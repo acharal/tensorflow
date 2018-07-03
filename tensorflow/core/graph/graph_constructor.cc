@@ -184,12 +184,15 @@ class GraphConstructor {
   // input_already_exists is a pre-initialized vector of length
   // node_def->input_size(). This function will mark inputs that are remapped to
   // true.
-  void RemapNodeDefInputs(NodeDef* node_def, std::vector<bool>* input_already_exists);
+  void RemapNodeDefInputs(NodeDef* node_def,
+                          std::vector<bool>* input_already_exists);
   // input_already_exists is a pre-initialized vector of length
   // node_def->input_size(). This function will add and mark control inputs as
   // true.
-  void AddControlDependencies(NodeDef* node_def, std::vector<bool>* input_already_exists);
-  void AddPrefixToNodeDef(const std::vector<bool>& input_already_exists, NodeDef* node_def);
+  void AddControlDependencies(NodeDef* node_def,
+                              std::vector<bool>* input_already_exists);
+  void AddPrefixToNodeDef(const std::vector<bool>& input_already_exists,
+                          NodeDef* node_def);
 
   // From constructor
   const Options opts_;
@@ -261,7 +264,6 @@ class GraphConstructor {
   };
   std::vector<EdgeInfo> back_edges_;
 };
-
 
 // This could be expensive but we don't expect to call it often, if at all (only
 // if there are multiple nodes in g_ with the same name)
@@ -422,24 +424,21 @@ Status GraphConstructor::InitFromEdges() {
     const NodeDef& node_def = *node_defs_[n];
 
     if (IsMerge(node_def)) {
-      // Cycles in the graph are only allowed for while loops and recursion.
-      // A while loop is identified by an edge from a NextIteration node to a Merge node.
+      // Cycles in the graph are only allowed for while loops and recursion. A while loop is
+      // identified by an edge from a NextIteration node to a Merge node.
       // A recursion is identified by an edge from a NextCall Node to a Merge node
       // For such Merge nodes, only wait for one non-control input before
       // considering the node ready to process in Convert().
       int32 num_control_edges = 0;
       bool has_loop_back_edge = false;
-
       for (int i = 0; i < node_def.input_size(); ++i) {
-
         StringPiece input_name(node_def.input(i));
-
         if (input_name.starts_with("^")) {
           num_control_edges++;
-        }
-        else {
+        } else {
           TensorId id(ParseTensorName(input_name));
-          if (next_iteration_call_nodes_.find(id.first.ToString()) != next_iteration_call_nodes_.end()) {
+          if (next_iteration_call_nodes_.find(id.first.ToString()) !=
+              next_iteration_call_nodes_.end()) {
             has_loop_back_edge = true;
           }
         }
@@ -449,10 +448,8 @@ Status GraphConstructor::InitFromEdges() {
       } else {
         pending_count_.push_back(node_def.input_size());
       }
-    }
-
-    // Does not necessarily mean cycle though - maybe I should find a better condition
-    else if (IsReturn(node_def)) {
+    } else if (IsReturn(node_def)) {
+      // Does not necessarily mean cycle though - maybe I should find a better condition
       int32 num_control_edges = 0;
 
       for (int i = 0; i < node_def.input_size(); ++i) {
@@ -466,18 +463,13 @@ Status GraphConstructor::InitFromEdges() {
 
       pending_count_.push_back(num_control_edges);
       ready_.push_back(n);
-    }
-
-    else {
+    } else {
       pending_count_.push_back(node_def.input_size());
     }
-
-
     if (node_def.input_size() == 0) {
       ready_.push_back(n);
       continue;
     }
-
     for (int i = 0; i < node_def.input_size(); ++i) {
       StringPiece input_name = node_def.input(i);
       TensorId id(ParseTensorName(input_name));
@@ -514,7 +506,7 @@ Status GraphConstructor::MakeNode(const NodeDef& node_def, Node** node) {
   // Add the node to the graph.
   Status status;
   *node = g_->AddNode(node_def, &status);
-  if (!status.ok()) {return status;}
+  if (!status.ok()) return status;
   if (opts_.expect_device_spec) {
     (*node)->set_assigned_device_name(node_def.device());
   }
@@ -797,6 +789,10 @@ Status GraphConstructor::Convert() {
         }
       }
 
+      // TODO(ashankar): The line below means an additional copy of the NodeDef,
+      // which can be expensive if the NodeDef contains large tensors in it.
+      // Might make sense to change the API for ImportGraphDef to take a mutable
+      // GraphDef* and avoid the copying.
       imported_node_def = original_node_def;
       if (!opts_.input_map.empty()) {
         // Note that input_already_exists can shrink here
@@ -807,8 +803,7 @@ Status GraphConstructor::Convert() {
         AddControlDependencies(&imported_node_def, &input_already_exists);
       }
       node_def = &imported_node_def;
-    }
-    else {
+    } else {
       node_def = &original_node_def;
     }
 
@@ -873,6 +868,8 @@ Status GraphConstructor::Convert() {
       }
     }
 
+    // TODO(skyewm): remove conditional when b/35715995 ("Functions lack shape
+    // inference") is resolved.
     if (g_->flib_def().Find(node_def->name()) == nullptr) {
       TF_RETURN_IF_ERROR(ValidateShape(node));
     }
@@ -995,9 +992,6 @@ Status GraphConstructor::MakeEdge(Node* src, int output_index, Node* dst,
 
 }  // namespace
 
-
-
-
 Status ConvertGraphDefToGraph(const GraphConstructorOptions& opts,
                               const GraphDef& gdef, Graph* g) {
   ShapeRefiner refiner(gdef.versions().producer(), g->op_registry());
@@ -1005,9 +999,6 @@ Status ConvertGraphDefToGraph(const GraphConstructorOptions& opts,
       opts, gdef.node(), &gdef.versions(), &gdef.library(), g, &refiner,
       /*return_tensors=*/nullptr, /*unused_input_map_keys=*/nullptr);
 }
-
-
-
 
 Status ConvertNodeDefsToGraph(const GraphConstructorOptions& opts,
                               gtl::ArraySlice<NodeDef> nodes, Graph* g) {
