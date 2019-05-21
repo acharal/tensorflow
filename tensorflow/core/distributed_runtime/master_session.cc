@@ -19,10 +19,6 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "tensorflow/core/framework/graph_def_util.h"
-#include "tensorflow/core/util/event.pb.h"
-#include "tensorflow/core/util/events_writer.h"
-
 #include "tensorflow/core/common_runtime/process_util.h"
 #include "tensorflow/core/common_runtime/profile_handler.h"
 #include "tensorflow/core/common_runtime/stats_publisher_interface.h"

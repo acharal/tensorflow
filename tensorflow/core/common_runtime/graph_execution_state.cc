@@ -361,7 +361,6 @@ Status GraphExecutionState::OptimizeGraph(
     optimized_graph->reset(new Graph(OpRegistry::Global()));
     TF_RETURN_IF_ERROR(
         ConvertGraphDefToGraph(opts, new_graph, optimized_graph->get()));
-
     // The graph conversion sets the requested device names but not the assigned
     // device names. However, since at this point the graph is placed TF expects
     // an assigned device name for every node. Therefore we copy the requested
