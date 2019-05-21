@@ -148,7 +148,6 @@ class GraphConstructor {
         refiner_(refiner),
         return_tensors_(return_tensors),
         unused_input_map_keys_(unused_input_map_keys) {
-
         SetFunctionReturningNodes(node_defs);
   }
 
@@ -309,7 +308,6 @@ class GraphConstructor {
     int dst_index;
   };
   std::vector<EdgeInfo> back_edges_;
-
   std::unordered_set<string> function_returning_nodes_;
 };
 
@@ -484,17 +482,7 @@ Status GraphConstructor::InitFromEdges() {
   // Parse the inputs for each node.
   for (int n = 0; n < num_nodes; ++n) {
     const NodeDef& node_def = *node_defs_[n];
-
-    if (IsReturningNode(node_def)) {
-      int32 num_control_edges = 0;
-      for (int i = 0; i < node_def.input_size(); ++i) {
-        if (StringPiece(node_def.input(i)).starts_with("^")) {
-          num_control_edges++;
-        }
-      }
-      pending_count_.push_back(num_control_edges + 1);
-
-    } else if (IsMerge(node_def)) {
+    if (IsMerge(node_def)) {
       // Cycles in the graph are only allowed for while loops and recursion.
       // A while loop is identified by an edge from a NextIteration node to a Merge node.
       // A recursion is identified by an edge from a Call Node to a Merge node
@@ -522,6 +510,14 @@ Status GraphConstructor::InitFromEdges() {
       } else {
         pending_count_.push_back(node_def.input_size());
       }
+    } else if (IsReturningNode(node_def)) {
+      int32 num_control_edges = 0;
+      for (int i = 0; i < node_def.input_size(); ++i) {
+        if (StringPiece(node_def.input(i)).starts_with("^")) {
+          num_control_edges++;
+        }
+      }
+      pending_count_.push_back(num_control_edges + 1);
     } else {
       pending_count_.push_back(node_def.input_size());
     }
