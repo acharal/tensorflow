@@ -519,14 +519,12 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
     *graph = item.graph;
     CallRewriter call_rewriter(item, graph, ctx);
     while (1) {
-        call_rewriter.CollectCalls(calls);
+        TF_RETURN_IF_ERROR(call_rewriter.CollectCalls(calls));
         if (calls.empty()) {
-            printf("Empty calls\n");
             break;
         }
         for (CallInfo& call : calls) {
-            printf("Transform call %s\n", call.function_name.c_str());
-            call_rewriter.TransformCall(call);
+            TF_RETURN_IF_ERROR(call_rewriter.TransformCall(call));
         }
         calls.clear();
     }
