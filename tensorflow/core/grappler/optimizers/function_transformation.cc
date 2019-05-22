@@ -530,7 +530,7 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
             if (!s.ok())
               printf("Error: %s\n", s.error_message().c_str());
             return s;
-            printf("After transforming call %s:\n %s\n", call.function_name.c_str(), SummarizeGraphDef(graph).c_str());
+            printf("After transforming call %s:\n %s\n", call.function_name.c_str(), SummarizeGraphDef(*graph).c_str());
         }
         calls.clear();
     }
