@@ -410,17 +410,13 @@ Status InlineFunction(const FunctionDef& func_def,
         return errors::InvalidArgument(
                  "Failed to inline function ", func_def.signature().name());
     }
-
     int arg_size = func_def.signature().input_arg_size();
-
     // create an inverse map of arg to provide name -> argument number
     std::unordered_map<string, int> input_nodes;
     for (int i = 0; i < arg_size; ++i) {
         const OpDef::ArgDef& arg = func_def.signature().input_arg(i);
         input_nodes[arg.name()] = i;
     }
-
-
     func_info.inputs.resize(arg_size);
     func_info.input_def.resize(arg_size);
     for (int i = 0; i < arg_size; ++i) {
@@ -491,27 +487,21 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
             GraphDef* graph,
             FuncInfo& func_info) {
     const auto& it = transformed_functions_.find(func_name);
-
     // maybe it is not wise to discard call attributes
     // possible type specialization?
     if (it != transformed_functions_.end()) {
         func_info = it->second;
         return Status::OK();
     }
-
     const FunctionDef* func_def = ctx.FindInlinedFunction(func_name);
-
     if (func_def == nullptr) {
         return errors::InvalidArgument(
                         "Invalid argument, function ", func_name, "can not be found",
                         "or not marked to be inlined");
     }
-
     TF_RETURN_IF_ERROR(
         InlineFunction(*func_def, ctx, func_attr, device, graph, func_info));
-
     transformed_functions_[func_name] = func_info;
-
     return Status::OK();
 }
 
@@ -520,32 +510,24 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
 Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& item,
                                         GraphDef* graph) {
     FunctionInliningContext ctx(item);
-
     if (!ctx.HasInlinedFunctions()) {
         *graph = item.graph;
         return Status::OK();
     }
-
     std::vector<CallInfo> calls;
     *graph = item.graph;
-
     CallRewriter call_rewriter(item, graph, ctx);
-
     while (1) {
         call_rewriter.CollectCalls(calls);
-
         if (calls.empty()) {
             break;
         }
-
         for (CallInfo& call : calls) {
             call_rewriter.TransformCall(call);
         }
         calls.clear();
     }
-
     call_rewriter.Finalize();
-
     return Status::OK();
 }
 
