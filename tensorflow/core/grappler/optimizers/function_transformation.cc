@@ -525,7 +525,7 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
             break;
         }
         for (CallInfo& call : calls) {
-            printf("Transform call %s\n", call.function_name);
+            printf("Transform call %s\n", call.function_name.c_str());
             call_rewriter.TransformCall(call);
         }
         calls.clear();
