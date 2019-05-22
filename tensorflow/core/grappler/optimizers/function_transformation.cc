@@ -512,6 +512,7 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
     FunctionInliningContext ctx(item);
     if (!ctx.HasInlinedFunctions()) {
         *graph = item.graph;
+        printf("No inline functions\n");
         return Status::OK();
     }
     std::vector<CallInfo> calls;
@@ -520,9 +521,11 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
     while (1) {
         call_rewriter.CollectCalls(calls);
         if (calls.empty()) {
+            printf("Empty calls\n");
             break;
         }
         for (CallInfo& call : calls) {
+            printf("Transform call %s\n", call.function_name);
             call_rewriter.TransformCall(call);
         }
         calls.clear();
