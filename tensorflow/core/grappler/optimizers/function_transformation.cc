@@ -392,6 +392,7 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
             }
         }
     }
+    printf("Mark call %s (function %s) as transformed\n", call_info.node_name.c_str(), call_info.function_name.c_str());
     MarkCallTransformed(call_info);
 
 
@@ -502,6 +503,7 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
     TF_RETURN_IF_ERROR(
         InlineFunction(*func_def, ctx, func_attr, device, graph, func_info));
     transformed_functions_[func_name] = func_info;
+    printf("Store inlined function %s\n", func_name.c_str());
     return Status::OK();
 }
 
@@ -510,21 +512,25 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
 Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& item,
                                         GraphDef* graph) {
     FunctionInliningContext ctx(item);
+    CallRewriter call_rewriter(item, graph, ctx);
+
+    *graph = item.graph;
     if (!ctx.HasInlinedFunctions()) {
-        *graph = item.graph;
-        printf("No inline functions\n");
         return Status::OK();
     }
+
     std::vector<CallInfo> calls;
-    *graph = item.graph;
-    CallRewriter call_rewriter(item, graph, ctx);
     while (1) {
         TF_RETURN_IF_ERROR(call_rewriter.CollectCalls(calls));
         if (calls.empty()) {
             break;
         }
         for (CallInfo& call : calls) {
-            TF_RETURN_IF_ERROR(call_rewriter.TransformCall(call));
+            Status& s = call_rewriter.TransformCall(call);
+            if (!s.ok())
+              printf("Error: %s\n", s.error_message().c_str());
+            return s;
+            printf("After transforming call %s:\n %s\n", call.function_name.c_str(), SummarizeGraphDef(graph).c_str());
         }
         calls.clear();
     }
