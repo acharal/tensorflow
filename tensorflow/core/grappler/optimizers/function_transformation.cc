@@ -133,15 +133,6 @@ Status CopyArgType(const OpDef::ArgDef& arg,
     return Status::OK();
 }
 
-Status SetArgType(const OpDef::ArgDef& arg,
-                  const std::unordered_map<string, AttrValue>& func_attr,
-                  std::unordered_map<string, AttrValue>& node_attr) {
-    DataType type;
-    TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
-    node_attr["T"].set_type(type);
-    return Status::OK();
-}
-
 struct CallInfo {
     int call_id;
     NodeDef* node;
@@ -437,7 +428,11 @@ Status InlineFunction(const FunctionDef& func_def,
         NodeDef* merge = graph->add_node();
         merge->set_name(AddPrefixToNodeName(strings::StrCat("Input", "_", i), prefix));
         merge->set_op("Identity");
-        SetArgType(arg, func_attr, *merge->mutable_attr());
+
+        DataType type;
+        TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
+        auto& attr = *merge->mutable_attr();
+        attr["T"].set_type(type);
 
         func_info.inputs[i] = merge;
         func_info.input_def[i] = arg;
