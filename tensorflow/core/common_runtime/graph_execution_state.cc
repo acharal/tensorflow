@@ -391,6 +391,8 @@ Status GraphExecutionState::BuildGraph(const BuildGraphOptions& options,
   Status s = OptimizeGraph(options, &ng);
   if (!s.ok()) {
     // Simply copy the original graph if we couldn't optimize it.
+    printf("Could not optimize with error %s\n", s.error_message().c_str());
+    printf("Falling back to original graph\n");
     ng.reset(new Graph(flib_def_.get()));
     CopyGraph(*graph_, ng.get());
   }
