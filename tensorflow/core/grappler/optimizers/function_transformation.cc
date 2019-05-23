@@ -527,14 +527,16 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
         }
         for (CallInfo& call : calls) {
             const Status& s = call_rewriter.TransformCall(call);
-            if (!s.ok())
+            if (!s.ok()) {
               printf("Error: %s\n", s.error_message().c_str());
-            return s;
+              return s;
+            }
             printf("After transforming call %s:\n %s\n", call.function_name.c_str(), SummarizeGraphDef(*graph).c_str());
         }
         calls.clear();
     }
     call_rewriter.Finalize();
+    printf("After finalizing:\n %s\n", SummarizeGraphDef(*graph).c_str());
     return Status::OK();
 }
 
