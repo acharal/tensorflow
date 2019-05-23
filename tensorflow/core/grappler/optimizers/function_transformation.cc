@@ -133,6 +133,14 @@ Status CopyArgType(const OpDef::ArgDef& arg,
     return Status::OK();
 }
 
+Status SetArgType(const OpDef::ArgDef& arg,
+                  const std::unordered_map<string, AttrValue>& func_attr,
+                  const std::unordered_map<string, AttrValue>& node_attr) {
+    DataType type;
+    TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
+    node_attr["T"].set_type(type);
+}
+
 struct CallInfo {
     int call_id;
     NodeDef* node;
@@ -280,6 +288,9 @@ Status CallRewriter::AddCallOp(const CallInfo& call_info,
     TF_RETURN_IF_ERROR(CopyArgType(arg, call_info.attr, &type));
 
     auto& attr = *call->mutable_attr();
+
+    //SetArgType(arg, call_info.attr, attr);
+
     attr["T"].set_type(type);
     attr["frame_name"].set_s(call_info.function_name);
     attr["call_id"].set_i(call_info.call_id);
@@ -425,6 +436,8 @@ Status InlineFunction(const FunctionDef& func_def,
         NodeDef* merge = graph->add_node();
         merge->set_name(AddPrefixToNodeName(strings::StrCat("Input", "_", i), prefix));
         merge->set_op("Identity");
+        SetArgType(arg, func_attr, *merge->mutable_attr());
+
         func_info.inputs[i] = merge;
         func_info.input_def[i] = arg;
     }
