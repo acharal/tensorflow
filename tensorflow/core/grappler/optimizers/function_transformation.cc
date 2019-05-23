@@ -510,11 +510,11 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
 }  // namespace
 
 Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& item,
-                                        GraphDef* graph) {
+                                        GraphDef* output) {
     FunctionInliningContext ctx(item);
-    CallRewriter call_rewriter(item, graph, ctx);
+    CallRewriter call_rewriter(item, output, ctx);
 
-    *graph = item.graph;
+    *output = item.graph;
     if (!ctx.HasInlinedFunctions()) {
         return Status::OK();
     }
@@ -526,17 +526,19 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
             break;
         }
         for (CallInfo& call : calls) {
-            const Status& s = call_rewriter.TransformCall(call);
+            Status s = call_rewriter.TransformCall(call);
             if (!s.ok()) {
               printf("Error: %s\n", s.error_message().c_str());
               return s;
             }
-            printf("After transforming call %s:\n %s\n", call.function_name.c_str(), SummarizeGraphDef(*graph).c_str());
+            printf("After transforming call %s:\n %s\n", call.function_name.c_str(), SummarizeGraphDef(*output).c_str());
         }
         calls.clear();
     }
     call_rewriter.Finalize();
-    printf("After finalizing:\n %s\n", SummarizeGraphDef(*graph).c_str());
+    printf("After finalizing:\n %s\n", SummarizeGraphDef(*output).c_str());
+    *output->mutable_library() = item.graph.library();
+    *output->mutable_versions() = item.graph.versions();
     return Status::OK();
 }
 
