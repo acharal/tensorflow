@@ -135,10 +135,11 @@ Status CopyArgType(const OpDef::ArgDef& arg,
 
 Status SetArgType(const OpDef::ArgDef& arg,
                   const std::unordered_map<string, AttrValue>& func_attr,
-                  const std::unordered_map<string, AttrValue>& node_attr) {
+                  std::unordered_map<string, AttrValue>& node_attr) {
     DataType type;
     TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
     node_attr["T"].set_type(type);
+    return Status::OK();
 }
 
 struct CallInfo {
