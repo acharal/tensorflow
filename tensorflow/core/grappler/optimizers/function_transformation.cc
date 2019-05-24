@@ -429,6 +429,7 @@ Status InlineFunction(const FunctionDef& func_def,
         NodeDef* merge = graph->add_node();
         merge->set_name(AddPrefixToNodeName(strings::StrCat("Input", "_", i), prefix));
         merge->set_op("Identity");
+        merge->set_device(device);
 
         DataType type;
         TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
@@ -473,7 +474,8 @@ Status InlineFunction(const FunctionDef& func_def,
         func_body_node.set_name(AddPrefixToNodeName(curr_name, prefix));
 
         // Make sure the node is placed
-        func_body_node.set_device(device);
+        if (func_body_node.device().empty())
+          func_body_node.set_device(device);
 
         // Move the node to the main graph
         graph->add_node()->Swap(&func_body_node);
