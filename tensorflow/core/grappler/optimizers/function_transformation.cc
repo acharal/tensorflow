@@ -388,12 +388,17 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
             *out->add_input() = ret_nodes[i]->name();
         }
     } else {
+        /*
         if (func_info.outputs.size() == 1) {
             ReplaceOutput(call_info.node_name, ret_nodes[0]->name());
         } else {
             for (unsigned int out_port = 0; out_port < func_info.outputs.size(); out_port++) {
                 ReplaceOutput(strings::StrCat(call_info.node_name, ":", out_port), ret_nodes[out_port]->name());
             }
+        }
+        */
+        for (unsigned int out_port = 0; out_port < func_info.outputs.size(); out_port++) {
+            ReplaceOutput(strings::StrCat(call_info.node_name, ":", out_port), ret_nodes[out_port]->name());
         }
     }
     printf("Mark call %s (function %s) as transformed\n", call_info.node_name.c_str(), call_info.function_name.c_str());
@@ -484,6 +489,7 @@ Status InlineFunction(const FunctionDef& func_def,
     func_info.outputs.clear();
     func_info.outputs.resize(item->fetch.size());
     func_info.output_def.resize(item->fetch.size());
+
     for (unsigned int i = 0; i < item->fetch.size(); i++) {
         func_info.outputs[i] = AddPrefixToNodeName(item->fetch[i], prefix);
         func_info.output_def[i] = func_def.signature().output_arg(i);
