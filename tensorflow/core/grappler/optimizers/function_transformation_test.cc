@@ -33,7 +33,7 @@ class FunctionTransformationTest : public ::testing::Test {
 
 };
 
-TEST_F(FunctionTransformatioTest, NoTrans) {
+TEST_F(FunctionTransformationTest, NoTrans) {
 
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
 
