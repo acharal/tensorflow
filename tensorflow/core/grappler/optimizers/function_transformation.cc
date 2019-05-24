@@ -252,6 +252,7 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
             call.node_name = node.name();
             call.function_name = node.op();
             call.node = &node;
+            call.device = node.device();
 
             std::unordered_map<string, AttrValue> call_attr(node.attr().begin(), node.attr().end());
             call.attr = call_attr;
@@ -546,8 +547,14 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
     }
     call_rewriter.Finalize();
     printf("After finalizing:\n %s\n", SummarizeGraphDef(*output).c_str());
-    *output->mutable_library() = item.graph.library();
     *output->mutable_versions() = item.graph.versions();
+
+    // Function Library should be pruned of unreachable function definitions
+    // cf. https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/grappler/optimizers/function_optimizer.cc#L428
+    // however in this version there is a check in meta_optimizer that guarantees
+    // that function library remains of the same length
+    // cf. https://github.com/acharal/tensorflow/blob/r1.4_recursion/tensorflow/core/grappler/optimizers/meta_optimizer.cc#L132
+    *output->mutable_library() = item.graph.library();
     return Status::OK();
 }
 
