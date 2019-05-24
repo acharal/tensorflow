@@ -150,7 +150,7 @@ tf_cc_test(
     srcs = ["function_transformation_test.cc"],
     shard_count = 5,
     deps = [
-        ":function_tranformation",
+        ":function_transformation",
         "//tensorflow/cc:cc_ops",
         "//tensorflow/core:all_kernels",
         "//tensorflow/core:core_cpu",
