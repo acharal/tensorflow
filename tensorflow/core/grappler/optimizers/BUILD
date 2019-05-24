@@ -145,6 +145,27 @@ cc_library(
     ],
 )
 
+tf_cc_test(
+    name = "function_transformation_test",
+    srcs = ["function_transformation_test.cc"],
+    shard_count = 5,
+    deps = [
+        ":function_tranformation",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/core:all_kernels",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:core_cpu_internal",
+        "//tensorflow/core:direct_session",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+        "//tensorflow/core/grappler:grappler_item",
+        "//tensorflow/core/grappler:utils",
+    ],
+)
+
 cc_library(
     name = "graph_rewriter",
     srcs = ["graph_rewriter.cc"],
