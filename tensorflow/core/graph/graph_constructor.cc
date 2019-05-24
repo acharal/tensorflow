@@ -43,6 +43,9 @@ limitations under the License.
 namespace tensorflow {
 
 namespace {
+inline bool IsCall(const NodeDef& node_def) {
+  return node_def.op() == "Call" || node_def.op() == "RefCall";
+}
 inline bool IsMerge(const NodeDef& node_def) {
   return node_def.op() == "Merge" || node_def.op() == "RefMerge";
 }
@@ -52,14 +55,8 @@ inline bool IsNextIteration(const NodeDef& node_def) {
          node_def.op() == "RefNextIteration";
 }
 
-inline bool IsCall(const NodeDef& node_def) {
-  return node_def.op() == "Call" ||
-         node_def.op() == "RefCall";
-}
-
 inline bool IsReturn(const NodeDef& node_def) {
-      return node_def.op() == "Return" ||
-             node_def.op() == "RefReturn";
+  return node_def.op() == "Return" || node_def.op() == "RefReturn";
 }
 
 bool IsValidNodeName(StringPiece s, bool allow_internal_ops) {
@@ -195,50 +192,12 @@ class GraphConstructor {
   void AddPrefixToNodeDef(const std::vector<bool>& input_already_exists,
                           NodeDef* node_def);
 
+  void SetFunctionReturningNodes(const NodeDefSlice& node_defs);
+
   bool IsReturningNode(const NodeDef& node_def) {
     return (function_returning_nodes_.find(node_def.name()) !=
                                        function_returning_nodes_.end());
   }
-
-  void SetFunctionReturningNodes(const NodeDefSlice& node_defs) {
-
-    std::unordered_map<string, std::set<int>> returning_nodes;
-
-    for (int n = 0; n < node_defs.size(); ++n) {
-      const NodeDef& node_def = *node_defs[n];
-      if (IsReturn(node_def)) {
-        // Nodes that send their output to "Return" nodes are
-        // function Returning Nodes and in case of recursive functions
-        // those nodes are part of graph cycles.
-        for (const auto& input : node_def.input()) {
-          // In order to detect the recursion cycles we depend on
-          // the fact that a recursive function's returning node,
-          // will be sending outputs to at least 2 "Return" nodes
-          // with different "call_id" attributes (same "call_id"
-          // attrs would mean that they belong in the same function call
-          // but they correspond to different function outputs)
-          if (!StringPiece(input).starts_with("^")) {
-            int call_id;
-            GetNodeAttr(AttrSlice(node_def), "call_id", &call_id);
-
-            size_t pos;
-            string prevNode;
-            ((pos = input.find(":")) != std::string::npos) ?
-            (prevNode = input.substr(0, pos)) : (prevNode = input);
-
-            returning_nodes[prevNode].emplace(call_id);
-          }
-        }
-      }
-    }
-    for (auto& retnode : returning_nodes) {
-      if (retnode.second.size() > 1) {
-        // Detected Cycle
-        function_returning_nodes_.insert(retnode.first);
-      }
-    }
-  }
-
 
     // From constructor
   const Options opts_;
@@ -373,6 +332,43 @@ Status GraphConstructor::EnsureNoNameCollisions() {
     }
   }
   return Status::OK();
+}
+
+void GraphConstructor::SetFunctionReturningNodes(
+    const NodeDefSlice& node_defs) {
+  std::unordered_map<string, std::set<int>> returning_nodes;
+  for (int n = 0; n < node_defs.size(); ++n) {
+    const NodeDef& node_def = *node_defs[n];
+    if (IsReturn(node_def)) {
+      // Nodes that send their output to "Return" nodes are
+      // function Returning Nodes and in case of recursive functions
+      // those nodes are part of graph cycles.
+      for (const auto& input : node_def.input()) {
+        // In order to detect the recursion cycles we depend on
+        // the fact that a recursive function's returning node,
+        // will be sending outputs to at least 2 "Return" nodes
+        // with different "call_id" attributes (same "call_id"
+        // attrs would mean that they belong in the same function call
+        // but they correspond to different function outputs)
+        if (!StringPiece(input).starts_with("^")) {
+          string prevNode = input;
+          size_t pos = input.find(":");
+          if (pos != std::string::npos)
+            prevNode = input.substr(0, pos);
+
+          int call_id;
+          GetNodeAttr(AttrSlice(node_def), "call_id", &call_id);
+          returning_nodes[prevNode].emplace(call_id);
+        }
+      }
+    }
+  }
+  for (auto& retnode : returning_nodes) {
+    if (retnode.second.size() > 1) {
+      // Detected Cycle
+      function_returning_nodes_.insert(retnode.first);
+    }
+  }
 }
 
 Status GraphConstructor::ValidateInputMapAndControlDependencies() {
