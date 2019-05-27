@@ -47,7 +47,7 @@ Status BuildControlFlowInfo(Graph* g, std::vector<ControlFlowInfo>* info) {
     const Node* parent = curr_info.parent_frame;
     frame_name = curr_info.frame_name;
 
-    if (IsExit(curr_node)) {
+    if (IsExit(curr_node) || IsReturn(curr_node)) {
       // Exit to the parent frame.
       const ControlFlowInfo& parent_info = (*info)[parent->id()];
       frame = parent_info.frame;
@@ -72,7 +72,7 @@ Status BuildControlFlowInfo(Graph* g, std::vector<ControlFlowInfo>* info) {
       }
 
       // Process the node 'out'.
-      if (IsEnter(out)) {
+      if (IsEnter(out) || IsCall(out)) {
         if (is_visited) {
           const string& parent_frame = (*info)[out_parent->id()].frame_name;
           if (parent_frame != frame_name) {
