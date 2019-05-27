@@ -336,7 +336,7 @@ void OptimizeControlFlowColocation(Graph* graph) {
           return;
         }
       }
-    } else if (IsExit(node)) {
+    } else if (IsExit(node) || IsReturn(node)) {
       for (const Edge* in_edge : node->in_edges()) {
         if (!in_edge->IsControlEdge()) {
           // Colocate with upstream node.
@@ -347,6 +347,7 @@ void OptimizeControlFlowColocation(Graph* graph) {
       }
     } else {
       if ((IsEnter(node) && !IsRefType(node->input_type(0))) ||
+          (IsCall(node)  && !IsRefType(node->input_type(0))) ||
           IsNextIteration(node)) {
         const Edge* data_edge = nullptr;
         for (const Edge* out_edge : node->out_edges()) {
