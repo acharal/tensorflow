@@ -36,6 +36,8 @@ Status BuildControlFlowInfo(Graph* g, std::vector<ControlFlowInfo>* info) {
   src_info.frame = src_node;
   src_info.parent_frame = src_node;
 
+  std::unordered_map<string,Node*> call_nodes;
+
   string frame_name;
   std::deque<Node*> ready;
   ready.push_back(src_node);
@@ -47,7 +49,20 @@ Status BuildControlFlowInfo(Graph* g, std::vector<ControlFlowInfo>* info) {
     const Node* parent = curr_info.parent_frame;
     frame_name = curr_info.frame_name;
 
-    if (IsExit(curr_node) || IsReturn(curr_node)) {
+    if (IsExit(curr_node)) {
+      // Exit to the parent frame.
+      const ControlFlowInfo& parent_info = (*info)[parent->id()];
+      frame = parent_info.frame;
+      parent = parent_info.parent_frame;
+      frame_name = parent_info.frame_name;
+    }
+
+    if (IsReturn(curr_node)) {
+      int call_id;
+      TF_RETURN_IF_ERROR(GetNodeAttr(curr_node->attrs(), "call_id", &call_id));
+      const string& call_key = strings::StrCat(frame_name, ":", call_id)
+      parent = call_nodes[call_key];
+
       // Exit to the parent frame.
       const ControlFlowInfo& parent_info = (*info)[parent->id()];
       frame = parent_info.frame;
@@ -72,7 +87,7 @@ Status BuildControlFlowInfo(Graph* g, std::vector<ControlFlowInfo>* info) {
       }
 
       // Process the node 'out'.
-      if (IsEnter(out) || IsCall(out)) {
+      if (IsEnter(out)) {
         if (is_visited) {
           const string& parent_frame = (*info)[out_parent->id()].frame_name;
           if (parent_frame != frame_name) {
@@ -91,6 +106,32 @@ Status BuildControlFlowInfo(Graph* g, std::vector<ControlFlowInfo>* info) {
               GetNodeAttr(out->attrs(), "frame_name", &out_info->frame_name));
           if (out_info->frame_name.empty()) {
             return errors::InvalidArgument("The Enter node ", out->name(),
+                                           " must have a frame name.");
+          }
+        }
+      } else if (IsCall(out)) {
+        if (is_visited) {
+          const string& parent_frame = (*info)[out_parent->id()].frame_name;
+          if (parent_frame != frame_name) {
+            return errors::InvalidArgument(
+                "The node '", out->name(),
+                "' has inputs from different "
+                "frames. The input '",
+                curr_node->name(), "' is in frame '", frame_name,
+                "'. The input '", parent_nodes[out->id()]->name(),
+                "' is in frame '", parent_frame, "'.");
+          }
+        } else {
+          out_info->frame = out;
+          out_info->parent_frame = frame;
+          TF_RETURN_IF_ERROR(
+              GetNodeAttr(out->attrs(), "frame_name", &out_info->frame_name));
+          int call_id;
+          TF_RETURN_IF_ERROR(GetNodeAttr(out->attrs(), "call_id", &call_id));
+          const string& call_key = strings::StrCat(out_info->frame_name, ":", call_id)
+          call_nodes[call_key] = out;
+          if (out_info->frame_name.empty()) {
+            return errors::InvalidArgument("The Call node ", out->name(),
                                            " must have a frame name.");
           }
         }
