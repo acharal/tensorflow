@@ -683,7 +683,7 @@ Status ExecutorImpl::Initialize() {
     if (IsEnter(n)) {
       string enter_name;
       TF_RETURN_IF_ERROR(GetNodeAttr(n->attrs(), "frame_name", &enter_name));
-      EnsureFrameInfo(item->frame_name)->input_count++;
+      EnsureFrameInfo(enter_name)->input_count++;
       item->frame_name = enter_name;
       item->dyn_frame_name = enter_name;
     }
