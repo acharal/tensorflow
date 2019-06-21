@@ -23,6 +23,11 @@ bool IsAddN(const NodeDef& node) {
   return op == "AddN";
 }
 
+bool IsCall(const NodeDef& node) {
+  const auto& op = node.op();
+  return op == "Call" || op == "RefCall";
+}
+
 bool IsConcat(const NodeDef& node) {
   const auto op = node.op();
   return op == "Concat" || op == "ConcatV2";
@@ -48,16 +53,6 @@ bool IsEnter(const NodeDef& node) {
 bool IsExit(const NodeDef& node) {
   const auto& op = node.op();
   return op == "Exit" || op == "RefExit";
-}
-
-bool IsCall(const NodeDef& node) {
-  const auto& op = node.op();
-  return op == "Call" || op == "RefCall";
-}
-
-bool IsReturn(const NodeDef& node) {
-  const auto& op = node.op();
-  return op == "Return" || op == "RefReturn";
 }
 
 bool IsIdentity(const NodeDef& node) {
@@ -95,6 +90,11 @@ bool IsReduction(const NodeDef& node) {
   const auto& op = node.op();
   return op == "Sum" || op == "Prod" || op == "Min" || op == "Max" ||
          op == "Mean" || op == "Any" || op == "All";
+}
+
+bool IsReturn(const NodeDef& node) {
+  const auto& op = node.op();
+  return op == "Return" || op == "RefReturn";
 }
 
 bool IsReshape(const NodeDef& node) { return (node.op() == "Reshape"); }
