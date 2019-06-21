@@ -284,6 +284,7 @@ bool ConstantFolding::IsFoldable(const NodeDef& node) const {
   if (op_def->output_arg_size() == 0) {
     return false;
   }
+
   // No need to (and don't) fold nodes that have no outgoing edges except
   // whitelisted nodes. Such nodes could be introduced by an earlier constant
   // folding pass and are preserved in case users want to fetch their values;

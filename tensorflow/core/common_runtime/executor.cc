@@ -681,22 +681,22 @@ Status ExecutorImpl::Initialize() {
     // Initialize static information about the frames in the graph.
     frame_info->nodes->push_back(n);
     if (IsEnter(n)) {
-        TF_RETURN_IF_ERROR(GetNodeAttr(n->attrs(), "frame_name", &item->frame_name));
-        item->dyn_frame_name = item->frame_name;
+      string enter_name;
+      TF_RETURN_IF_ERROR(GetNodeAttr(n->attrs(), "frame_name", &enter_name));
+      EnsureFrameInfo(enter_name)->input_count++;
+      item->frame_name = enter_name;
+      item->dyn_frame_name = enter_name;
     }
     if (item->is_call_or_return) {
-        TF_RETURN_IF_ERROR(GetNodeAttr(n->attrs(), "frame_name", &item->frame_name));
-        TF_RETURN_IF_ERROR(GetNodeAttr(n->attrs(), "call_id", &item->call_id));
-        item->dyn_frame_name = strings::StrCat(item->call_id);
-    }
-    if (item->is_enter) {
-      EnsureFrameInfo(item->frame_name)->input_count++;
-    }
-    if (item->is_call) {
-      input_count[item->dyn_frame_name]++;
-      // The following assumes that all the calls of same function have the same number of inputs
-      // which is of course apparent for a well-formed graph (produced by the transformation)
-      EnsureFrameInfo(item->frame_name)->input_count = input_count[item->dyn_frame_name];
+      TF_RETURN_IF_ERROR(GetNodeAttr(n->attrs(), "frame_name", &item->frame_name));
+      TF_RETURN_IF_ERROR(GetNodeAttr(n->attrs(), "call_id", &item->call_id));
+      item->dyn_frame_name = strings::StrCat(item->call_id);
+      if (item->is_call) {
+        input_count[item->dyn_frame_name]++;
+        // The following assumes that all the calls of same function have the same number of inputs
+        // which is of course apparent for a well-formed graph (produced by the transformation)
+        EnsureFrameInfo(item->frame_name)->input_count = input_count[item->dyn_frame_name];
+      }
     }
   }
 
@@ -1004,7 +1004,6 @@ class ExecutorState {
     // frame_name.
     uint64 frame_id;
 
-
     int call_id = -1;
 
     // The iteration id of its parent frame when this frame is created.
@@ -1244,7 +1243,6 @@ class ExecutorState {
   // The unique name of a frame.
   inline string MakeFrameName(FrameState* frame, int64 iter_id,
                               const string& name) {
-    //return strings::StrCat(frame->frame_name, frame->frame_id, ";", iter_id, ";", name);
     return strings::StrCat(frame->frame_id, ";", iter_id, ";", name);
   }
   // The unique name of a frame.
@@ -1406,25 +1404,18 @@ Status ExecutorImpl::BuildControlFlowInfo(const Graph* g,
           GetNodeAttr(curr_node->attrs(), "frame_name", &frame_name));
 
       int call_id;
-
       TF_RETURN_IF_ERROR(
                 GetNodeAttr(curr_node->attrs(), "call_id", &call_id));
       // we assume that call_id is unique and we don't need to concat with frame_name
       // to make it unique.
-
       call_id_to_call_node_id.emplace(call_id, curr_id);
-
       parent = curr_node;
-
     } else if (IsReturn(curr_node)) {
-
       int call_id;
-
       TF_RETURN_IF_ERROR(
           GetNodeAttr(curr_node->attrs(), "call_id", &call_id));
 
       auto it = call_id_to_call_node_id.find(call_id);
-
       if (it != call_id_to_call_node_id.end()) {
         int call_node_id = it->second;
         parent = parent_nodes[call_node_id];
@@ -1442,8 +1433,8 @@ Status ExecutorImpl::BuildControlFlowInfo(const Graph* g,
       Node* out = out_edge->dst();
       const int out_id = out->id();
 
-      if (IsReturn(out) && out_edge->IsControlEdge()) continue;
-
+      if (IsReturn(out) && out_edge->IsControlEdge()) 
+        continue;
       // Add to ready queue if not visited.
       bool is_visited = visited[out_id];
       if (!is_visited) {
@@ -2028,10 +2019,10 @@ void ExecutorState::PropagateOutputs(const TaggedNode& tagged_node,
                                                            input_iter, ready);
     }
   } else if (item->is_call) {
-//    if (is_dead) {
-//      // Stop the deadness propagation.
-//      output_frame = nullptr;
-//    } else {
+    //    if (is_dead) {
+    //      // Stop the deadness propagation.
+    //      output_frame = nullptr;
+    //    } else {
     FindOrCreateChildFrame(input_frame, input_iter, node, &output_frame);
     output_iter = 0;
     {
@@ -2040,20 +2031,20 @@ void ExecutorState::PropagateOutputs(const TaggedNode& tagged_node,
       output_frame->ActivateNodes(item, is_dead, output_iter, outputs, ready);
       output_frame->num_pending_inputs--;
     }
-//    }
+    //    }
     is_frame_done = input_frame->DecrementOutstandingOps(&impl_->gview_, input_iter, ready);
   } else if (item->is_return) {
-//    if (is_dead) {
-//      // Stop the deadness propagation.
-//      output_frame = nullptr;
-//    } else {
+    //    if (is_dead) {
+    //      // Stop the deadness propagation.
+    //      output_frame = nullptr;
+    //    } else {
     output_frame = input_frame->parent_frame;
     output_iter = input_frame->parent_iter;
     {
       mutex_lock l(output_frame->mu);
       output_frame->ActivateNodes(item, is_dead, output_iter, outputs, ready);
     }
-//    }
+    //    }
     is_frame_done = input_frame->DecrementOutstandingOps(&impl_->gview_, input_iter, ready);
   } else {
     DCHECK(IsNextIteration(node));
@@ -2555,10 +2546,10 @@ void ExecutorState::FrameState::ActivateNodes(const NodeItem* item,
         }
       }
     } else {
-      // In case of "Return" dst_node,
-      // we compare node's frame attr  with current frame name
-      // if they are different, ignore this op
       if (dst_item->is_return) {
+        // In case of "Return" dst_node,
+        // we compare node's frame attr  with current frame name
+        // if they are different, ignore this op
         if (dst_item->call_id != call_id)
             continue;
       }
@@ -2568,7 +2559,6 @@ void ExecutorState::FrameState::ActivateNodes(const NodeItem* item,
       int pending, dead;
       iter_state->adjust_for_activation(dst_pending_id, increment_dead,
                                         &pending, &dead);
-
 
       if (dst_item->is_return && increment_dead) {
         // The only dead input a Return op will ever may get
@@ -2581,10 +2571,8 @@ void ExecutorState::FrameState::ActivateNodes(const NodeItem* item,
         iter_state->adjust_for_activation(dst_pending_id, increment_dead,
                                           &pending, &dead);
       }
-
-        dst_dead = (dead > 0);
-        dst_ready = (pending == 0);
-
+      dst_dead = (dead > 0);
+      dst_ready = (pending == 0);
     }
 
     if (dst_need_input) {
