@@ -266,6 +266,7 @@ Status InlineFunction(const NodeDef& func_node, const FunctionDef& func,
       merge->set_op("IdentityN");
       merge->set_device(device);
       merge->add_input(call->name());
+      (*merge->mutable_attr())["T"].set_type(type);
 
       argmerge_map.emplace(arg.name(), merge);
     }
@@ -358,21 +359,17 @@ Status InlineFunction(const NodeDef& func_node, const FunctionDef& func,
 
     int j=0;
     for (auto it = argmerge_map.begin(); it != argmerge_map.end(); ++it, ++j) {
-        DataType type;
-        NodeDef *new_merge, *merge = it->second;
-        int i, size = merge->input_size();
-
-        TF_RETURN_IF_ERROR(CopyArgType(func_node, func_attr,
-                "input", func.signature().input_arg(j), &type));
+        NodeDef *merge = it->second;
+        int size = merge->input_size();
 
         if (size <= 1) {
             merge->set_op("Identity");
             merge->set_device(device);
-            (*merge->mutable_attr())["T"].set_type(type);
+//            (*merge->mutable_attr())["T"].set_type(type);
         } else {
             merge->set_op("Merge");
             merge->set_device(func_node.device());
-            (*merge->mutable_attr())["T"].set_type(type);
+//            (*merge->mutable_attr())["T"].set_type(type);
             (*merge->mutable_attr())["N"].set_i(size);
         }
     }
@@ -434,7 +431,7 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
 
           if (node.name() == id.first) {
 
-            if (created == false) {
+            if (!created) {
               idN = optimized_graph->add_node();
               idN->set_op("IdentityN");
               idN->set_name(node.name());
@@ -461,7 +458,7 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
     *optimized_graph->mutable_versions() = item.graph.versions();
     *optimized_graph->mutable_library() = item.graph.library();
 
-    /******************************************************************************************************
+    /******************************************************************************************************/
     // Dumps optimized graph in a not so readable form
     // const GraphDef* tmp = optimized_graph;
     // printf("Summarize Optimized Graph\n %s\n", SummarizeGraphDef(*tmp).c_str());
@@ -483,7 +480,7 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
     const void* bf = buf;
     event.set_graph_def(bf, proto_size);
     writer.WriteEvent(event);
-    ******************************************************************************************************/
+    /******************************************************************************************************/
 
     return Status::OK();
 }
