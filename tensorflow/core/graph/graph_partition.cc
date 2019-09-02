@@ -1579,7 +1579,7 @@ Status Partition(const PartitionOptions& opts, Graph* g,
   Status status;
   partitions->clear();
 
-//  GraphInfo g_info;
+  GraphInfo g_info;
 //  std::unique_ptr <Graph> new_g(new Graph(OpRegistry::Global()));
 
   if (!opts.control_flow_added) {
