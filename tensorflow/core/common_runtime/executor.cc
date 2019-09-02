@@ -1968,6 +1968,8 @@ void ExecutorState::PropagateOutputs(const TaggedNode& tagged_node,
     VLOG(2) << "Propagate Outputs: " << node->name();
     VLOG(2) << "Frame: " << input_frame->frame_name;
   }
+   printf("Propagate Outputs: %s,  am i alive? %d\n", node->name().c_str(), !is_dead);
+   printf("Frame: %s\n", input_frame->frame_name.c_str());
 
   // printf("Propagate Outputs: %s,  am i alive? %d\n", node->name().c_str(), !is_dead);
   // printf("Frame: %s\n", input_frame->frame_name.c_str());
@@ -2587,7 +2589,7 @@ void ExecutorState::FrameState::ActivateNodes(const NodeItem* item,
 
     // Add dst to the ready queue if it's ready
     if (dst_ready) {
-      //printf("    Add in queue: %s\n", dst_item->node->name().c_str());
+      printf("    Add in queue: %s\n", dst_item->node->name().c_str());
       if (dst_item->is_control_trigger) dst_dead = false;
       ready->push_back(TaggedNode(dst_item->node, this, iter, dst_dead));
       iter_state->outstanding_ops++;

@@ -563,6 +563,31 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
     // that function library remains of the same length
     // cf. https://github.com/acharal/tensorflow/blob/r1.4_recursion/tensorflow/core/grappler/optimizers/meta_optimizer.cc#L132
     *output->mutable_library() = item.graph.library();
+
+
+
+    /******************************************************************************************************/
+    // Dumps optimized graph in a not so readable form
+    // const GraphDef* tmp = optimized_graph;
+    // printf("Summarize Optimized Graph\n %s\n", SummarizeGraphDef(*tmp).c_str());
+    // Write an event, so that we can visualize this optimized graph in tensorboard
+    EventsWriter writer("TRANSFORMATION");
+    Event event;
+    event.set_wall_time(1234);
+    event.set_step(34);
+    const size_t proto_size = output->ByteSizeLong();
+    void* buf = port::Malloc(proto_size);
+    if (buf == nullptr) {
+    return errors::ResourceExhausted(
+              "Failed to allocate memory to serialize message of type '" ,
+              output->GetTypeName(), "' and size ", proto_size);
+    }
+  output->SerializeToArray(buf, proto_size);
+    const void* bf = buf;
+    event.set_graph_def(bf, proto_size);
+    writer.WriteEvent(event);
+    /******************************************************************************************************/
+
     return Status::OK();
 }
 
