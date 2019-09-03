@@ -478,7 +478,7 @@ Status GraphConstructor::InitFromEdges() {
   // Parse the inputs for each node.
   for (int n = 0; n < num_nodes; ++n) {
     const NodeDef& node_def = *node_defs_[n];
-    if (IsMerge(node_def)) {
+    if (IsMerge(node_def) && !IsReturningNode(node_def)) {
       // Cycles in the graph are only allowed for while loops and recursion.
       // A while loop is identified by an edge from a NextIteration node to a Merge node.
       // A recursion is identified by an edge from a Call Node to a Merge node
