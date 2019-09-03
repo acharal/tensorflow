@@ -326,7 +326,7 @@ Status CallRewriter::ConnectInput(NodeDef* from, NodeDef* to) {
     }
     to->add_input(from->name());
     if (to->input_size() > 1) {
-        (*to->mutable_attrs())["N"].set_i(to->input_size());
+        (*to->mutable_attr())["N"].set_i(to->input_size());
     }
     return Status::OK();
 }
