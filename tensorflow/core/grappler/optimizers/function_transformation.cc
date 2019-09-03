@@ -272,7 +272,9 @@ Status CallRewriter::AddCallOp(const CallInfo& call_info,
                const OpDef::ArgDef arg,
                const string& input,
                int arg_id, NodeDef* call) {
-    call->set_name(strings::StrCat(call_info.node_name, "/", "Call_", arg_id));
+    string prefix = call_info.node_name;
+    string call_name = strings::StrCat("Call", "_", arg_id);
+    call->set_name(AddPrefixToNodeName(call_name, prefix));
     call->set_op("Call");
     //call->set_device(node.device());
     call->add_input(input);
@@ -297,7 +299,9 @@ Status CallRewriter::AddRetOp(const CallInfo& call_info,
               const OpDef::ArgDef arg,
               const string& input,
               int arg_id, NodeDef* ret) {
-    ret->set_name(strings::StrCat(call_info.node_name, "/", "Ret_", arg_id));
+    string prefix = call_info.node_name;
+    string ret_name = strings::StrCat("Ret", "_", arg_id);
+    ret->set_name(AddPrefixToNodeName(ret_name, prefix));
     ret->set_op("Return");
     ret->add_input(input);
 
