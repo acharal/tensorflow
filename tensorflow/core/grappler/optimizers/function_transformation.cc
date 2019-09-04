@@ -280,13 +280,13 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
     }
     for (NodeDef* ngrad : grad_nodes) {
         CallInfo* fwd_call = nullptr;
-        for (string& in : ngrad->input()) { 
+        for (const string& in : ngrad->input()) { 
             const auto& it = call_map.find(NodeName(in));
-            if (it != nullptr) {
-                fwd_call = &it.second;
-                string func_name;
-                GetAttr(fwd_call->node, kFuncAttr, &func_name);
-                CHECK_EQ(fwd_call->function_name, func_name);
+            if (it != call_map.end()) {
+                fwd_call = &it->second;
+                //string func_name;
+                //GetAttr(fwd_call->node, kFuncAttr, &func_name);
+                //CHECK_EQ(fwd_call->function_name, func_name);
                 break;
             }
         }
@@ -294,10 +294,10 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
             return errors::InvalidArgument("Cannot find forward node for gradient ",
                     ngrad->name());
         }
-        call.grad_node = ngrad;
+        fwd_call->grad_node = ngrad;
     }
 
-    for (auto& it : grad_nodes) {
+    for (const auto& it : call_map) {
         calls.push_back(it.second);
     }
     return Status::OK();
