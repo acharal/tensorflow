@@ -35,6 +35,11 @@ namespace tensorflow {
 namespace grappler {
 namespace {
 
+static constexpr const char* const kCallOp = "Call";
+static constexpr const char* const kRetOp = "Return";
+static constexpr const char* const kIdentityOp = "Identity";
+static constexpr const char* const kIdentityNOp = "IdentityN";
+static constexpr const char* const kMergeOp = "Merge";
 static constexpr const char* const kGradientOp =
     FunctionLibraryDefinition::kGradientOp;
 static constexpr const char* const kFuncAttr =
@@ -304,8 +309,8 @@ Status CallRewriter::AddCallOp(const CallInfo& call_info,
                int arg_id, NodeDef* call) {
     string prefix = call_info.node_name;
     string call_name = strings::StrCat("Call", "_", arg_id);
+    call->set_op(kCallOp);
     call->set_name(AddPrefixToNodeName(call_name, prefix));
-    call->set_op("Call");
     //call->set_device(node.device());
     call->add_input(input);
 
@@ -331,8 +336,8 @@ Status CallRewriter::AddRetOp(const CallInfo& call_info,
               int arg_id, NodeDef* ret) {
     string prefix = call_info.node_name;
     string ret_name = strings::StrCat("Ret", "_", arg_id);
+    ret->set_op(kRetOp);
     ret->set_name(AddPrefixToNodeName(ret_name, prefix));
-    ret->set_op("Return");
     ret->add_input(input);
 
     DataType type;
@@ -352,7 +357,7 @@ Status CallRewriter::ConnectInput(NodeDef* from, NodeDef* to) {
     if (to_input == 1) {
         // it is Identity and we convert it to Merge.
         CHECK(IsIdentity(*to));
-        to->set_op("Merge");
+        to->set_op(kMergeOp);
     }
     to->add_input(from->name());
     if (to->input_size() > 1) {
@@ -414,7 +419,7 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
         // The other information such as types, device placement etc remain the same.
         // The IdentityN node will sync the outputs and therefore may result to performance degradation.
         NodeDef* out = graph->add_node();
-        out->set_op("IdentityN");
+        out->set_op(kIdentityNOp);
         out->set_name(call_info.node_name);
         out->set_device(call_info.device);
         AttrValue::ListValue* type_list = (*out->mutable_attr())["T"].mutable_list();
@@ -463,7 +468,7 @@ Status InlineFunction(const FunctionDef& func_def,
         const OpDef::ArgDef& arg = func_def.signature().input_arg(i);
         NodeDef* merge = graph->add_node();
         merge->set_name(AddPrefixToNodeName(strings::StrCat("Input", "_", i), prefix));
-        merge->set_op("Identity");
+        merge->set_op(kIdentityOp);
         merge->set_device(device);
 
         DataType type;
@@ -486,7 +491,7 @@ Status InlineFunction(const FunctionDef& func_def,
             CHECK_EQ(0, func_body_node.input_size());
             // Turn input placeholders into identity nodes
             if (IsPlaceholder(func_body_node)) {
-                func_body_node.set_op("Identity");
+                func_body_node.set_op(kIdentityOp);
             }
             // Connect merge with input arg
             func_body_node.add_input(func_info.inputs[input_it->second]->name());

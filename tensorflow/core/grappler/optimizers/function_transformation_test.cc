@@ -46,7 +46,7 @@ TEST_F(FunctionTransformationTest, NoTrans) {
   item.fetch.push_back("d");
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
 
-  FunctionTransformation func_trans();
+  FunctionTransformation func_trans;
   GraphDef output;
   Status status = func_trans.Optimize(nullptr, item, &output);
   TF_EXPECT_OK(status);
