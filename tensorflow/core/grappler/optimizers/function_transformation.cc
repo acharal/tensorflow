@@ -35,12 +35,8 @@ namespace tensorflow {
 namespace grappler {
 namespace {
 
-typedef std::unordered_map<string, NodeDef*> ArgMergeMap;
-
 struct FuncInfo {
-  ArgMergeMap argMergeMap;
   gtl::ArraySlice<string> fetch;
-
   std::vector<NodeDef*> inputs;
   std::vector<OpDef::ArgDef> input_def;
   std::vector<string> outputs;
@@ -72,9 +68,9 @@ class FunctionInliningContext {
       std::unordered_map<string, const FunctionDef*> functions;
       for (const FunctionDef& func : item.graph.library().function()) {
         // Don't inline functions marked as noinline
-//                    if (func.attr().count("_noinline") != 0) {
-//                      continue;
-//                    }
+        // if (func.attr().count("_noinline") != 0) {
+        //   continue;
+        // }
         // Don't touch anything marked XLA to prevent XLA failures further down
         // the road.
         if (func.attr().count("_XlaCompile") > 0 &&
@@ -150,7 +146,7 @@ class CallRewriter {
         : graph(graph_), ctx(ctx_), item(item_) { }
 
     ~CallRewriter() {
-        Finalize();
+        Flush();
     }
 
     Status CollectCalls(std::vector<CallInfo>& calls);
@@ -163,7 +159,7 @@ class CallRewriter {
         const string& device,
         GraphDef* optimized_graph, FuncInfo& func_info);
 
-    void Finalize() {
+    void Flush() {
         if (!nodes_to_delete.empty()) {
             // garbage collect the transformed call nodes
             int last = graph->node_size() - 1;
@@ -225,7 +221,7 @@ class CallRewriter {
         NodeDef* node = call_info.node;
         node->clear_input();
         node->set_op("NoOp");
-        node->set_name(strings::StrCat("$$$", node->name()));
+        node->set_name(AddPrefixToNodeName(node->name(), "$MarkToDelete$"));
         nodes_to_delete.insert(node->name());
     }
 
@@ -552,8 +548,9 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
             printf("After transforming call %s:\n %s\n", call.function_name.c_str(), SummarizeGraphDef(*output).c_str());
         }
         calls.clear();
+        call_rewriter.Flush();
     }
-    call_rewriter.Finalize();
+    call_rewriter.Flush();
     printf("After finalizing:\n %s\n", SummarizeGraphDef(*output).c_str());
     *output->mutable_versions() = item.graph.versions();
 
