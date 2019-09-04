@@ -35,6 +35,11 @@ namespace tensorflow {
 namespace grappler {
 namespace {
 
+static constexpr const char* const kGradientOp =
+    FunctionLibraryDefinition::kGradientOp;
+static constexpr const char* const kFuncAttr =
+    FunctionLibraryDefinition::kFuncAttr;
+
 struct FuncInfo {
   gtl::ArraySlice<string> fetch;
   std::vector<NodeDef*> inputs;
@@ -132,6 +137,7 @@ Status CopyArgType(const OpDef::ArgDef& arg,
 struct CallInfo {
     int call_id;
     NodeDef* node;
+    NodeDef* grad_node;
     string node_name;
     string function_name;
     string device;
@@ -239,27 +245,55 @@ class CallRewriter {
 
 Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
 
+    std::unordered_map<string,CallInfo> call_map;
+    std::vector<NodeDef*> grad_nodes;
+
     // identify and collect calls in the graph
     for (NodeDef& node : *graph->mutable_node()) {
-        const FunctionDef* func = ctx.FindInlinedFunction(node.op());
-        if (func != nullptr) {
-            CallInfo call;
-            call.call_id = GetCallId(node);
-            call.node_name = node.name();
-            call.function_name = node.op();
-            call.node = &node;
-            call.device = node.device();
+        if (node.op() == kGradientOp) {
+            grad_nodes.emplace(&node);
+        } else {
+            const FunctionDef* func_def = ctx.FindInlinedFunction(node.op());
+            if (func_def != nullptr) {
+                CallInfo& call = call_map[node.name()];
+                call.call_id = GetCallId(node);
+                call.node_name = node.name();
+                call.function_name = node.op();
+                call.node = &node;
+                call.device = node.device();
 
-            std::unordered_map<string, AttrValue> call_attr(node.attr().begin(), node.attr().end());
-            call.attr = call_attr;
+                std::unordered_map<string, AttrValue> call_attr(node.attr().begin(), node.attr().end());
+                call.attr = call_attr;
 
-            int input_size = func->signature().input_arg_size();
-            call.input_nodes.resize(input_size);
-            for (int i = 0; i < input_size; i++) {
-                call.input_nodes[i] = node.input(i);
+                int input_size = func_def->signature().input_arg_size();
+                call.input_nodes.resize(input_size);
+                for (int i = 0; i < input_size; i++) {
+                    call.input_nodes[i] = node.input(i);
+                }
             }
-            calls.push_back(call);
         }
+    }
+    for (NodeDef* ngrad : grad_nodes) {
+        CallInfo* fwd_call = nullptr;
+        for (string& in : ngrad->inputs()) { 
+            auto& it = call_map.find(NodeName(in));
+            if (it != nullptr) {
+                fwd_call = &it.second;
+                string func_name;
+                GetAttr(fwd_call->node, kFuncAttr, &func_name);
+                CHECK_EQ(fwd_call->function_name, func_name);
+                break;
+            }
+        }
+        if (fwd_call == nullptr) {
+            return errors::InvalidArgument("Cannot find forward node for gradient ",
+                    ngrad->name());
+        }
+        call.grad_node = ngrad;
+    }
+    
+    for (auto& it : grad_nodes) {
+        calls.push_back(it.second);
     }
     return Status::OK();
 }
