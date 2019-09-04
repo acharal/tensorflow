@@ -251,7 +251,7 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
     // identify and collect calls in the graph
     for (NodeDef& node : *graph->mutable_node()) {
         if (node.op() == kGradientOp) {
-            grad_nodes.emplace(&node);
+            grad_nodes.push_back(&node);
         } else {
             const FunctionDef* func_def = ctx.FindInlinedFunction(node.op());
             if (func_def != nullptr) {
@@ -275,8 +275,8 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
     }
     for (NodeDef* ngrad : grad_nodes) {
         CallInfo* fwd_call = nullptr;
-        for (string& in : ngrad->inputs()) { 
-            auto& it = call_map.find(NodeName(in));
+        for (string& in : ngrad->input()) { 
+            const auto& it = call_map.find(NodeName(in));
             if (it != nullptr) {
                 fwd_call = &it.second;
                 string func_name;
@@ -291,7 +291,7 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
         }
         call.grad_node = ngrad;
     }
-    
+
     for (auto& it : grad_nodes) {
         calls.push_back(it.second);
     }
