@@ -332,6 +332,7 @@ def _SymGrad(op, out_grads):
   # pylint: disable=protected-access
   in_grads = functional_ops._symbolic_gradient(input=f_in, Tout=f_types, f=f)
   # pylint: enable=protected-access
+  in_grads.attr["_n"].s = op.name
   return in_grads
 
 

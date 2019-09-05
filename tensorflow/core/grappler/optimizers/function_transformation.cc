@@ -284,9 +284,9 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
             const auto& it = call_map.find(NodeName(in));
             if (it != call_map.end()) {
                 fwd_call = &it->second;
-                //string func_name;
-                //GetAttr(fwd_call->node, kFuncAttr, &func_name);
-                //CHECK_EQ(fwd_call->function_name, func_name);
+                if (ngrad->attr()["_n"] == fwd_call->node_name) {
+
+                }
                 break;
             }
         }

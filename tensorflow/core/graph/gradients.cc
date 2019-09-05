@@ -115,6 +115,7 @@ static Node* AddSymGrad(Graph* g, Node* n, gtl::ArraySlice<NodeOut> grads) {
   }
   AddNodeAttr("f", func, &ndef);
   Status s;
+  AddNodeAttr("_n", n->name(), &ndef);
   Node* ret = g->AddNode(ndef, &s);
   TF_CHECK_OK(s);
   return ret;
