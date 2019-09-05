@@ -285,7 +285,7 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
             return errors::InvalidArgument("Cannot find forward node for gradient ",
                     ngrad->name());
         }
-        CallInfo* fwd_call = *fwd_call_id;
+        CallInfo* fwd_call = *fwd_call_it;
         fwd_call->grad_node = ngrad;
     }
 
