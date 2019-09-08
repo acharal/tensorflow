@@ -18,6 +18,8 @@ limitations under the License.
 #include "tensorflow/core/util/event.pb.h"
 #include "tensorflow/core/util/events_writer.h"
 
+#include "tensorflow/core/common_runtime/function.h"
+
 #include "tensorflow/core/graph/tensor_id.h"
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/function.pb.h"
@@ -57,9 +59,19 @@ struct FuncInfo {
 class FunctionInliningContext {
   public:
     explicit FunctionInliningContext(const GrapplerItem& item)
-            : library_(&item.graph.library()), functions_(InliningCandidates(item)) {}
+            : library_(&item.graph.library()), functions_(InliningCandidates(item)) {
+
+      // Todo: Deallocate this afterwards
+      lib_def_ = new FunctionLibraryDefinition(OpRegistry::Global(), item.graph.library());
+
+      get_func_sig_ = [this](const string& op, const OpDef** sig) {
+          return lib_def_->LookUpOpDef(op, sig);
+      };
+    }
 
     const FunctionDefLibrary& Library() const { return *library_; }
+    const FunctionLibraryDefinition* Libdef() const { return lib_def_; }
+    const std::function<Status(const string&, const OpDef**)> GetFuncSig() const {return get_func_sig_;}
 
     bool HasInlinedFunctions() const { return !functions_.empty(); }
 
@@ -99,7 +111,9 @@ class FunctionInliningContext {
     }
 
     const FunctionDefLibrary* library_;
+    const FunctionLibraryDefinition* lib_def_;
     std::unordered_map<string, const FunctionDef*> functions_;
+    std::function<Status(const string&, const OpDef**)> get_func_sig_;
 
     TF_DISALLOW_COPY_AND_ASSIGN(FunctionInliningContext);
 };
@@ -541,18 +555,32 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
 
     GraphDef func_graph = item->graph;
 
-    for (NodeDef& n : func_graph.mutable_node()) {
+    for (NodeDef& n : *func_graph.mutable_node()) {
         for (string& input : *n.mutable_input()) {
             input = AddPrefixToNodeName(input, prefix);
         }
         n.set_name(AddPrefixToNodeName(n.name(), prefix));
     }
 
-    GraphConstructorOptions graph_ctor_opts;
-    graph_ctor_opts.allow_internal_ops = true;
-    graph_ctor_opts.expect_device_spec = false;
-    std::unique_ptr<Graph> graphptr(new Graph(ctx.Library()));
-    TF_RETURN_IF_ERROR(ConvertGraphDefToGraph(graph_ctor_opts, func_graph, graphptr.get()));
+    // Get func_def's gradient graph
+    FunctionBody **fbody, *fgrad_body;
+    FunctionDefToBodyHelper(func_def, AttrSlice(&func_def.attr()), ctx.Libdef(), ctx.GetFuncSig(), fbody);
+    fgrad_body = SymbolicGradient(**fbody);
+    FunctionDef& grad_def = fgrad_body->fdef;
+
+    FunctionDefLibrary functionDefLibrary;
+    functionDefLibrary.add_function()->Swap(&grad_def);
+//    std::unordered_map<string, AttrValue> call_attr(node.attr().begin(), node.attr().end());
+    std::unique_ptr<GrapplerItem> tmp_item = GrapplerItemFromFunctionDef(grad_def, func_attr, functionDefLibrary);
+    printf("Gradient definition of  %s:\n %s\n", grad_def.signature().name().c_str(), SummarizeGraphDef(tmp_item->graph).c_str());
+
+
+
+//    GraphConstructorOptions graph_ctor_opts;
+//    graph_ctor_opts.allow_internal_ops = true;
+//    graph_ctor_opts.expect_device_spec = false;
+//    std::unique_ptr<Graph> graphptr(new Graph(ctx.Library()));
+//    TF_RETURN_IF_ERROR(ConvertGraphDefToGraph(graph_ctor_opts, func_graph, graphptr.get()));
 
     /*
     // Populate 'y_node_outputs_' with node function body outputs.
@@ -574,95 +602,95 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
         gbody_->arg_nodes.push_back(dy);
         y_grad_node_outputs.push_back({dy, 0});
     }
-    
+
     const size_t num_x = fbody_->arg_nodes.size();
     std::vector<NodeOut> x_node_outputs;
     x_node_outputs.reserve(num_x);
     for (size_t i = 0; i < fbody_->arg_nodes.size(); ++i) {
         x_node_outputs.push_back({gbody_->arg_nodes[i], 0});
-    } 
+    }
     */
-    std::vector<NodeOut> x_grad_node_outputs;
-    TF_CHECK_OK(AddSymbolicGradients(y_node_outputs, x_node_outputs,
-                                   y_grad_node_outputs, &x_grad_node_outputs,
-                                   graphptr.get()));
-    GraphDef output_graph_def;
-    graphptr->ToGraphDef(&output_graph_def);
-
-    int arg_size = func_def.signature().input_arg_size();
-    // create an inverse map of arg to provide name -> argument number
-    std::unordered_map<string, int> input_nodes;
-    for (int i = 0; i < arg_size; ++i) {
-        const OpDef::ArgDef& arg = func_def.signature().input_arg(i);
-        input_nodes[arg.name()] = i;
-    }
-    func_info.inputs.resize(arg_size);
-    func_info.input_def.resize(arg_size);
-    for (int i = 0; i < arg_size; ++i) {
-        const OpDef::ArgDef& arg = func_def.signature().input_arg(i);
-        NodeDef* merge = graph->add_node();
-        merge->set_name(AddPrefixToNodeName(strings::StrCat("Input", "_", i), prefix));
-        merge->set_op(kIdentityOp);
-        merge->set_device(device);
-
-        DataType type;
-        TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
-        auto& attr = *merge->mutable_attr();
-        attr["T"].set_type(type);
-
-        func_info.inputs[i] = merge;
-        func_info.input_def[i] = arg;
-    }
-
-    // prefix each node in function graph and place it to the global graph.
-    // the inputs of each node need to be renamed as well to reflect the change.
-    for (NodeDef& func_body_node : *item->graph.mutable_node()) {
-        const string& curr_name = func_body_node.name();
-        // If the func body node is func's input argument
-        auto input_it = input_nodes.find(curr_name);
-
-        if (input_it != input_nodes.end()) {
-            CHECK_EQ(0, func_body_node.input_size());
-            // Turn input placeholders into identity nodes
-            if (IsPlaceholder(func_body_node)) {
-                func_body_node.set_op(kIdentityOp);
-            }
-            // Connect merge with input arg
-            func_body_node.add_input(func_info.inputs[input_it->second]->name());
-        } else {
-            // Else if not an input_arg_node
-            // Update the input names if any.
-            for (string& input : *func_body_node.mutable_input()) {
-                input = AddPrefixToNodeName(input, prefix);
-            }
-            // If the node has no input, make hook it up to the Merge nodes to ensure
-            // it runs in the same frame as the other nodes of the function body.
-            if (func_body_node.input_size() == 0) {
-                for (auto& func_input_node : func_info.inputs) {
-                 *func_body_node.add_input() = AsControlDependency(func_input_node->name());
-                }
-            }
-        }
-
-        // Add the node name as a prefix to avoid collisions after inlining
-        func_body_node.set_name(AddPrefixToNodeName(curr_name, prefix));
-
-        // Make sure the node is placed
-        if (func_body_node.device().empty())
-          func_body_node.set_device(device);
-
-        // Move the node to the main graph
-        graph->add_node()->Swap(&func_body_node);
-    }
-
-    func_info.outputs.clear();
-    func_info.outputs.resize(item->fetch.size());
-    func_info.output_def.resize(item->fetch.size());
-
-    for (unsigned int i = 0; i < item->fetch.size(); i++) {
-        func_info.outputs[i] = AddPrefixToNodeName(item->fetch[i], prefix);
-        func_info.output_def[i] = func_def.signature().output_arg(i);
-    }
+//    std::vector<NodeOut> x_grad_node_outputs;
+//    TF_CHECK_OK(AddSymbolicGradients(y_node_outputs, x_node_outputs,
+//                                   y_grad_node_outputs, &x_grad_node_outputs,
+//                                   graphptr.get()));
+//    GraphDef output_graph_def;
+//    graphptr->ToGraphDef(&output_graph_def);
+//
+//    int arg_size = func_def.signature().input_arg_size();
+//    // create an inverse map of arg to provide name -> argument number
+//    std::unordered_map<string, int> input_nodes;
+//    for (int i = 0; i < arg_size; ++i) {
+//        const OpDef::ArgDef& arg = func_def.signature().input_arg(i);
+//        input_nodes[arg.name()] = i;
+//    }
+//    func_info.inputs.resize(arg_size);
+//    func_info.input_def.resize(arg_size);
+//    for (int i = 0; i < arg_size; ++i) {
+//        const OpDef::ArgDef& arg = func_def.signature().input_arg(i);
+//        NodeDef* merge = graph->add_node();
+//        merge->set_name(AddPrefixToNodeName(strings::StrCat("Input", "_", i), prefix));
+//        merge->set_op(kIdentityOp);
+//        merge->set_device(device);
+//
+//        DataType type;
+//        TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
+//        auto& attr = *merge->mutable_attr();
+//        attr["T"].set_type(type);
+//
+//        func_info.inputs[i] = merge;
+//        func_info.input_def[i] = arg;
+//    }
+//
+//    // prefix each node in function graph and place it to the global graph.
+//    // the inputs of each node need to be renamed as well to reflect the change.
+//    for (NodeDef& func_body_node : *item->graph.mutable_node()) {
+//        const string& curr_name = func_body_node.name();
+//        // If the func body node is func's input argument
+//        auto input_it = input_nodes.find(curr_name);
+//
+//        if (input_it != input_nodes.end()) {
+//            CHECK_EQ(0, func_body_node.input_size());
+//            // Turn input placeholders into identity nodes
+//            if (IsPlaceholder(func_body_node)) {
+//                func_body_node.set_op(kIdentityOp);
+//            }
+//            // Connect merge with input arg
+//            func_body_node.add_input(func_info.inputs[input_it->second]->name());
+//        } else {
+//            // Else if not an input_arg_node
+//            // Update the input names if any.
+//            for (string& input : *func_body_node.mutable_input()) {
+//                input = AddPrefixToNodeName(input, prefix);
+//            }
+//            // If the node has no input, make hook it up to the Merge nodes to ensure
+//            // it runs in the same frame as the other nodes of the function body.
+//            if (func_body_node.input_size() == 0) {
+//                for (auto& func_input_node : func_info.inputs) {
+//                 *func_body_node.add_input() = AsControlDependency(func_input_node->name());
+//                }
+//            }
+//        }
+//
+//        // Add the node name as a prefix to avoid collisions after inlining
+//        func_body_node.set_name(AddPrefixToNodeName(curr_name, prefix));
+//
+//        // Make sure the node is placed
+//        if (func_body_node.device().empty())
+//          func_body_node.set_device(device);
+//
+//        // Move the node to the main graph
+//        graph->add_node()->Swap(&func_body_node);
+//    }
+//
+//    func_info.outputs.clear();
+//    func_info.outputs.resize(item->fetch.size());
+//    func_info.output_def.resize(item->fetch.size());
+//
+//    for (unsigned int i = 0; i < item->fetch.size(); i++) {
+//        func_info.outputs[i] = AddPrefixToNodeName(item->fetch[i], prefix);
+//        func_info.output_def[i] = func_def.signature().output_arg(i);
+//    }
 
     return Status::OK();
 }
@@ -688,7 +716,7 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
                         "or not marked to be inlined");
     }
     TF_RETURN_IF_ERROR(
-        InlineFunction(*func_def, ctx, func_attr, device, graph, func_info));
+            InlineFunctionAndGradient(*func_def, ctx, func_attr, device, graph, func_info));
     transformed_functions_[func_name] = func_info;
     printf("Store inlined function %s\n", func_name.c_str());
     return Status::OK();

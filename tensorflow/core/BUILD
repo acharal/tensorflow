@@ -766,6 +766,19 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "core_function",
+    visibility = ["//visibility:public"],
+    hdrs = [
+        "common_runtime/function.h",
+        "common_runtime/device_mgr.h",
+        "common_runtime/process_function_library_runtime.h",
+    ],
+    deps = [
+        ":core_cpu_base",
+    ],
+)
+
 # This includes implementations of all kernels built into TensorFlow.
 cc_library(
     name = "all_kernels",
