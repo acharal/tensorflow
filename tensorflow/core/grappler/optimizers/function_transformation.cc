@@ -161,7 +161,9 @@ struct CallInfo {
     string function_name;
     string device;
     std::vector<string> input_nodes;
+    std::vector<string> grad_input_nodes
     std::unordered_map<string, AttrValue> attr;
+    std::unordered_map<string, AttrValue> grad_attr;
 };
 
 class CallRewriter {
@@ -300,6 +302,15 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
                     ngrad->name());
         }
         CallInfo& fwd_call = fwd_call_it->second;
+
+        std::unordered_map<string, AttrValue> grad_call_attr(ngrad.attr().begin(), ngrad.attr().end());
+        fwd_call.grad_attr = grad_call_attr;
+
+        int grad_input_size = func_def->signature().output_arg_size();
+        fwd_call.grad_input_nodes.resize(grad_input_size);
+        for (int i = 0; i < grad_input_size; i++) {
+            fwd_call.grad_input_nodes[i] = ngrad.input(i);
+        }
         fwd_call.grad_node = ngrad;
     }
 
@@ -569,13 +580,28 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
             ctx.GetFuncSig(), &fbody));
 
     FunctionBody* fgrad_body = SymbolicGradient(*fbody);
-    FunctionDef& grad_def = fgrad_body->fdef;
+    GraphDef fgrad_graphdef;
+    fgrad_body->graph->ToGraphDef(&fgrad_graphdef);
+    printf("\n\nGradient definition %s:\n\n", SummarizeGraphDef(fgrad_graphdef).c_str());
 
-    FunctionDefLibrary functionDefLibrary;
-    functionDefLibrary.add_function()->Swap(&grad_def);
-//    std::unordered_map<string, AttrValue> call_attr(node.attr().begin(), node.attr().end());
-    std::unique_ptr<GrapplerItem> tmp_item = GrapplerItemFromFunctionDef(grad_def, func_attr, functionDefLibrary);
-    printf("Gradient definition of  %s:\n %s\n", grad_def.signature().name().c_str(), SummarizeGraphDef(tmp_item->graph).c_str());
+    /******************************************************************************************************/
+    EventsWriter writer("Gradient_");
+    Event event;
+    event.set_wall_time(1234);
+    event.set_step(34);
+    const size_t proto_size = fgrad_graphdef.ByteSizeLong();
+    void* buf = port::Malloc(proto_size);
+    if (buf == nullptr) {
+        return errors::ResourceExhausted(
+                "Failed to allocate memory to serialize message of type '" ,
+                fgrad_graphdef.GetTypeName(), "' and size ", proto_size);
+    }
+    fgrad_graphdef.SerializeToArray(buf, proto_size);
+    const void* bf = buf;
+    event.set_graph_def(bf, proto_size);
+    writer.WriteEvent(event);
+    /******************************************************************************************************/
+
 
 
 
