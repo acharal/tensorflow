@@ -161,7 +161,7 @@ struct CallInfo {
     string function_name;
     string device;
     std::vector<string> input_nodes;
-    std::vector<string> grad_input_nodes
+    std::vector<string> grad_input_nodes;
     std::unordered_map<string, AttrValue> attr;
     std::unordered_map<string, AttrValue> grad_attr;
 };
@@ -303,13 +303,13 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
         }
         CallInfo& fwd_call = fwd_call_it->second;
 
-        std::unordered_map<string, AttrValue> grad_call_attr(ngrad.attr().begin(), ngrad.attr().end());
+        std::unordered_map<string, AttrValue> grad_call_attr(ngrad->attr().begin(), ngrad->attr().end());
         fwd_call.grad_attr = grad_call_attr;
 
-        int grad_input_size = func_def->signature().output_arg_size();
+        int grad_input_size = ngrad->input_size();
         fwd_call.grad_input_nodes.resize(grad_input_size);
         for (int i = 0; i < grad_input_size; i++) {
-            fwd_call.grad_input_nodes[i] = ngrad.input(i);
+            fwd_call.grad_input_nodes[i] = ngrad->input(i);
         }
         fwd_call.grad_node = ngrad;
     }
