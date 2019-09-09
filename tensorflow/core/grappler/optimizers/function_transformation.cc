@@ -563,9 +563,12 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
     }
 
     // Get func_def's gradient graph
-    FunctionBody **fbody, *fgrad_body;
-    FunctionDefToBodyHelper(func_def, AttrSlice(&func_def.attr()), ctx.Libdef(), ctx.GetFuncSig(), fbody);
-    fgrad_body = SymbolicGradient(**fbody);
+    FunctionBody* fbody;
+    TF_RETURN_IF_ERROR(FunctionDefToBodyHelper(func_def, 
+            AttrSlice(&func_def.attr()), ctx.Libdef(), 
+            ctx.GetFuncSig(), &fbody));
+
+    FunctionBody* fgrad_body = SymbolicGradient(*fbody);
     FunctionDef& grad_def = fgrad_body->fdef;
 
     FunctionDefLibrary functionDefLibrary;
