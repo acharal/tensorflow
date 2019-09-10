@@ -556,9 +556,53 @@ Status InlineFunction(const FunctionDef& func_def,
 }
 
 /* In functions.cc */
-struct Endpoint;
-static Node* AddArg(Graph* g, DataType dtype, int index);
-static Node* AddRet(Graph* g, Endpoint input, int index);
+// Represents the index-th output of a node.
+struct Endpoint {
+  Node* node;
+  int index;
+
+  // Returns the string name represents this endpoint.
+  string name() const {
+    if (index == 0) {
+      return node->name();
+    } else {
+      return strings::StrCat(node->name(), ":", index);
+    }
+  }
+
+  DataType dtype() const { return node->output_type(index); }
+};
+
+
+static Node* AddArg(Graph* g, DataType dtype, int index) {
+  DCHECK_LT(0, dtype);
+  DCHECK_LT(dtype, DT_FLOAT_REF);
+  NodeDef ndef;
+  ndef.set_name(g->NewName(kNodeLabel));
+  ndef.set_op(kArgOp);
+  AddNodeAttr("T", dtype, &ndef);
+  AddNodeAttr("index", index, &ndef);
+  Status s;
+  Node* ret = g->AddNode(ndef, &s);
+  TF_CHECK_OK(s);
+  return ret;
+}
+
+static Node* AddRet(Graph* g, Endpoint input, int index) {
+  DCHECK_LT(0, input.dtype());
+  DCHECK_LT(input.dtype(), DT_FLOAT_REF);
+  NodeDef ndef;
+  ndef.set_name(g->NewName(kNodeLabel));
+  ndef.set_op(kRetOp);
+  ndef.add_input(input.name());
+  AddNodeAttr("T", input.dtype(), &ndef);
+  AddNodeAttr("index", index, &ndef);
+  Status s;
+  Node* ret = g->AddNode(ndef, &s);
+  TF_CHECK_OK(s);
+  g->AddEdge(input.node, input.index, ret, 0);
+  return ret;
+}
 
 void Copy(FunctionBody* fbody_, FunctionBody* gbody_) {
   const Graph& src = *(fbody_->graph);
@@ -658,7 +702,7 @@ FunctionBody* AmendSymbolicGradient(FunctionBody* fbody_) {
     for (int i = 0; i < arg_types_size; ++i) {
         Endpoint grad = {x_grad_node_outputs[i].node, x_grad_node_outputs[i].index};
         Node* ret = AddRet(g, grad, ret_types_size + i);
-        gbody_->ret_nodes.push_back(fbody_->arg_types[i]);
+        gbody_->ret_types.push_back(fbody_->arg_types[i]);
         gbody_->ret_nodes.push_back(ret);
     }
     auto ret = gbody_;
