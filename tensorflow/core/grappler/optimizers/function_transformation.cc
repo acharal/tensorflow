@@ -436,10 +436,10 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
         out->set_op(kIdentityNOp);
         out->set_name(call_info.node_name);
         out->set_device(call_info.device);
-        //AttrValue::ListValue* type_list = (*out->mutable_attr())["T"].mutable_list();
-        //for (const OpDef::ArgDef& arg : func_info.output_def) {
-        //  TF_RETURN_IF_ERROR(CopyArgType(arg, call_info.attr, type_list));
-        //}
+        AttrValue::ListValue* type_list = (*out->mutable_attr())["T"].mutable_list();
+        for (const DataType& type : func_info.output_types) {
+          type_list->add_type(type);
+        }
         for (unsigned int i = 0; i < func_info.outputs.size(); i++) {
             *out->add_input() = ret_nodes[i]->name();
         }
