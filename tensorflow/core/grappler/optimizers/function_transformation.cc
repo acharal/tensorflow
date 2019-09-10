@@ -555,6 +555,11 @@ Status InlineFunction(const FunctionDef& func_def,
     return Status::OK();
 }
 
+/* In functions.cc */
+struct Endpoint;
+static Node* AddArg(Graph* g, DataType dtype, int index);
+static Node* AddRet(Graph* g, Endpoint input, int index);
+
 void Copy(FunctionBody* fbody_, FunctionBody* gbody_) {
   const Graph& src = *(fbody_->graph);
   gbody_->graph = new Graph(src.op_registry());
