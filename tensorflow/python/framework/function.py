@@ -330,14 +330,13 @@ class _DefinedFunction(object):
       argtype = input_types[i]
       self._args.append((argname, argtype))
 
-    grad_func_name = self._func_name + "Grad"
-    out_names = self._out_names.copy()
-    for (argname, argtype) in self._args:
-      out_names.append("d" + argname)
-
     if self._create_grad_func:
-      # Todo: check if copy all the args so that they don't get passed by reference
-      self._grad_func = _DefinedFunction(func=func,
+        grad_func_name = self._func_name + "Grad"
+        out_names = self._out_names.copy()
+        for (argname, argtype) in self._args:
+            out_names.append("d" + argname)
+        # Todo: check if we need to copy all the args so that they don't get passed by reference
+        self._grad_func = _DefinedFunction(func=func,
                                          argnames=argnames,
                                          input_types=input_types,
                                          func_name=grad_func_name,
@@ -585,7 +584,7 @@ class _DefinedFunction(object):
       f.add_to_graph(g)
 
     # Adds its gradient function, too.
-    if self._grad_func:
+    if self._grad_func is not None:
       self._grad_func.add_to_graph(g)
 
   def __call__(self, *args, **kwargs):
