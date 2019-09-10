@@ -149,13 +149,13 @@ struct CallInfo {
     NodeDef* g_call = nullptr;
     
     std::vector<string> input_nodes;
-    std::vector<string> grad_input_nodes;
+    std::vector<string> g_input_nodes;
     std::unordered_map<string, AttrValue> f_attr;
     std::unordered_map<string, AttrValue> g_attr;
 
-    string& name() const { return node->name(); }
-    string& f_name() const { return node->op(); }
-    string& device() const { return node->device(); }
+    string& name() const { return f_call->name(); }
+    string& f_name() const { return f_call->op(); }
+    string& device() const { return f_call->device(); }
     bool hasGradient() { return (g_call != nullptr); }
 };
 
@@ -271,13 +271,10 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
             if (func_def != nullptr) {
                 CallInfo& call = call_map[node.name()];
                 call.call_id = GetCallId(node);
-                call.node_name = node.name();
-                call.function_name = node.op();
-                call.node = &node;
-                call.device = node.device();
+                call.node  = &node;
 
                 std::unordered_map<string, AttrValue> call_attr(node.attr().begin(), node.attr().end());
-                call.attr = call_attr;
+                call.f_attr = call_attr;
 
                 int input_size = func_def->signature().input_arg_size();
                 call.input_nodes.resize(input_size);
@@ -297,14 +294,14 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
         CallInfo& fwd_call = fwd_call_it->second;
 
         std::unordered_map<string, AttrValue> grad_call_attr(ngrad->attr().begin(), ngrad->attr().end());
-        fwd_call.grad_attr = grad_call_attr;
+        fwd_call.g_attr = grad_call_attr;
 
         int grad_input_size = ngrad->input_size();
-        fwd_call.grad_input_nodes.resize(grad_input_size);
+        fwd_call.g_input_nodes.resize(grad_input_size);
         for (int i = 0; i < grad_input_size; i++) {
-            fwd_call.grad_input_nodes[i] = ngrad->input(i);
+            fwd_call.g_input_nodes[i] = ngrad->input(i);
         }
-        fwd_call.grad_node = ngrad;
+        fwd_call.g_call = ngrad;
     }
 
     for (const auto& it : call_map) {
