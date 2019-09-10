@@ -736,12 +736,12 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
     Event event;
     event.set_wall_time(1234);
     event.set_step(34);
-    const size_t proto_size = fgrad_graphdef.ByteSizeLong();
+    const size_t proto_size = g_graph_def.ByteSizeLong();
     void* buf = port::Malloc(proto_size);
     if (buf == nullptr) {
         return errors::ResourceExhausted(
                 "Failed to allocate memory to serialize message of type '" ,
-                fgrad_graphdef.GetTypeName(), "' and size ", proto_size);
+                g_graph_def.GetTypeName(), "' and size ", proto_size);
     }
     g_graph_def.SerializeToArray(buf, proto_size);
     const void* bf = buf;
