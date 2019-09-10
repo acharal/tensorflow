@@ -21,6 +21,7 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/function.h"
 
 #include "tensorflow/core/graph/tensor_id.h"
+#include "tensorflow/core/graph/gradients.h"
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/function.pb.h"
 #include "tensorflow/core/framework/graph_def_util.h"
@@ -53,6 +54,10 @@ struct FuncInfo {
   std::vector<OpDef::ArgDef> input_def;
   std::vector<string> outputs;
   std::vector<OpDef::ArgDef> output_def;
+  std::vector<NodeDef*> grad_inputs;
+  std::vector<OpDef::ArgDef> grad_input_def;
+  std::vector<string> grad_outputs;
+  std::vector<OpDef::ArgDef> grad_output_def;
 };
 
 // same with commit b691c0 (possibly)
@@ -550,6 +555,111 @@ Status InlineFunction(const FunctionDef& func_def,
     return Status::OK();
 }
 
+void Copy(FunctionBody* fbody_, FunctionBody* gbody_) {
+  const Graph& src = *(fbody_->graph);
+  gbody_->graph = new Graph(src.op_registry());
+  Graph* dst = gbody_->graph;
+
+  std::vector<Node*> node_map(src.num_node_ids());
+
+  // Copy the nodes.
+  node_map[src.source_node()->id()] = dst->source_node();
+  node_map[src.sink_node()->id()] = dst->sink_node();
+  for (Node* n : src.op_nodes()) {
+    node_map[n->id()] = dst->CopyNode(n);
+  }
+
+  // Copy the edges.
+  for (const Edge* e : src.edges()) {
+    Node* src_copy = node_map[e->src()->id()];
+    Node* dst_copy = node_map[e->dst()->id()];
+    dst->AddEdge(src_copy, e->src_output(), dst_copy, e->dst_input());
+  }
+
+  // Save inputs in copied graph.
+  CHECK_EQ(fbody_->arg_types.size(), fbody_->arg_nodes.size());
+  gbody_->arg_types = fbody_->arg_types;
+  for (std::size_t i = 0; i < fbody_->arg_nodes.size(); ++i) {
+    gbody_->arg_nodes.push_back(node_map[fbody_->arg_nodes[i]->id()]);
+  }
+
+  // Save outputs in copied graph.
+  CHECK_EQ(fbody_->ret_types.size(), fbody_->ret_nodes.size());
+  gbody_->ret_types = fbody_->ret_types;
+  for (std::size_t i = 0; i < fbody_->ret_nodes.size(); ++i) {
+    gbody_->ret_nodes.push_back(node_map[fbody_->ret_nodes[i]->id()]);
+  }
+}
+
+/**
+ * Similar to [core/common_runtime/function.cc]::SymbolicGradientHelper::Compute()
+ */
+FunctionBody* AmendSymbolicGradient(FunctionBody* fbody_) {
+
+    FunctionBody* gbody_;
+    gbody_ = new FunctionBody;
+
+    // Copy fbody_ into gbody_.
+    Copy(fbody_, gbody_);
+
+    Graph* g = gbody_->graph;
+    const int num_y = static_cast<int>(gbody_->ret_nodes.size());
+
+    // Populate 'y_node_outputs_' with node function body outputs.
+    // Populate 'y_grad_nodes' with initial gradient nodes for each return node of
+    // the original function body (these will be 'arg' nodes in the function
+    // gradient body).
+    std::vector<NodeOut> y_node_outputs;
+    y_node_outputs.reserve(num_y);
+    std::vector<NodeOut> y_grad_node_outputs;
+    y_grad_node_outputs.reserve(num_y);
+    for (int i = 0; i < num_y; ++i) {
+        Node* y = gbody_->ret_nodes[i];
+        y_node_outputs.push_back({y, 0});
+        DCHECK_EQ(y->type_string(), kRetOp);
+        const DataType dtype = y->input_type(0);
+        const int index = static_cast<int>(gbody_->arg_nodes.size());
+        Node* dy = AddArg(g, dtype, index);
+        gbody_->arg_types.push_back(dtype);
+        gbody_->arg_nodes.push_back(dy);
+        y_grad_node_outputs.push_back({dy, 0});
+    }
+
+    // Populate 'x_nodes' with function args (excluding 'y_grad_node_outputs').
+    const size_t num_x = fbody_->arg_nodes.size();
+    std::vector<NodeOut> x_node_outputs;
+    x_node_outputs.reserve(num_x);
+    for (size_t i = 0; i < fbody_->arg_nodes.size(); ++i) {
+        x_node_outputs.push_back({gbody_->arg_nodes[i], 0});
+    }
+  
+    // Call AddSymbolicGradients which will add nodes to graph 'g' that
+    // compute the function gradient (adding an entry in 'x_grad_node_outputs' for
+    // each node in 'x_node_outputs').
+    std::vector<NodeOut> x_grad_node_outputs;
+    TF_CHECK_OK(AddSymbolicGradients(y_node_outputs, x_node_outputs,
+                                    y_grad_node_outputs, &x_grad_node_outputs,
+                                    g));
+    
+    // Do not remove the old return nodes from the function body.
+    // for (Node* n : gbody_->ret_nodes) {
+    //    g->RemoveNode(n);
+    //}
+    //gbody_->ret_types = fbody_->arg_types;
+    //gbody_->ret_nodes.clear();
+
+    const int arg_types_size = static_cast<int>(fbody_->arg_types.size());
+    const int ret_types_size = static_cast<int>(fbody_->ret_types.size());
+    for (int i = 0; i < arg_types_size; ++i) {
+        Endpoint grad = {x_grad_node_outputs[i].node, x_grad_node_outputs[i].index};
+        Node* ret = AddRet(g, grad, ret_types_size + i);
+        gbody_->ret_nodes.push_back(fbody_->arg_types[i]);
+        gbody_->ret_nodes.push_back(ret);
+    }
+    auto ret = gbody_;
+    gbody_ = nullptr;
+    return ret;
+}
 
 Status InlineFunctionAndGradient(const FunctionDef& func_def,
                       const FunctionInliningContext& ctx,
