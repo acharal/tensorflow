@@ -728,7 +728,7 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
 
     FunctionBody* gbody = AmendSymbolicGradient(fbody);
     GraphDef g_graph_def;
-    fgrad_body->graph->ToGraphDef(&g_graph_def);
+    gbody->graph->ToGraphDef(&g_graph_def);
     printf("\n\nGradient definition %s:\n\n", SummarizeGraphDef(g_graph_def).c_str());
 
     /******************************************************************************************************/
@@ -748,12 +748,6 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
     event.set_graph_def(bf, proto_size);
     writer.WriteEvent(event);
     /******************************************************************************************************/
-
-//    GraphConstructorOptions graph_ctor_opts;
-//    graph_ctor_opts.allow_internal_ops = true;
-//    graph_ctor_opts.expect_device_spec = false;
-//    std::unique_ptr<Graph> graphptr(new Graph(ctx.Library()));
-//    TF_RETURN_IF_ERROR(ConvertGraphDefToGraph(graph_ctor_opts, func_graph, graphptr.get()));
 
     /*
     // Populate 'y_node_outputs_' with node function body outputs.
