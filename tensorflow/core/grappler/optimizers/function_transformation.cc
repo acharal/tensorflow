@@ -327,7 +327,7 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
 }
 
 Status CallRewriter::AddCallOp(const CallInfo& call_info,
-               const OpDef::ArgDef arg,
+               const DataType type,
                const string& input,
                int arg_id, NodeDef* call) {
     string prefix = call_info.node_name;
@@ -337,13 +337,7 @@ Status CallRewriter::AddCallOp(const CallInfo& call_info,
     //call->set_device(node.device());
     call->add_input(input);
 
-    DataType type;
-    TF_RETURN_IF_ERROR(CopyArgType(arg, call_info.attr, &type));
-
     auto& attr = *call->mutable_attr();
-
-    //SetArgType(arg, call_info.attr, attr);
-
     attr["T"].set_type(type);
     attr["frame_name"].set_s(call_info.function_name);
     attr["call_id"].set_i(call_info.call_id);
@@ -354,7 +348,7 @@ Status CallRewriter::AddCallOp(const CallInfo& call_info,
 }
 
 Status CallRewriter::AddRetOp(const CallInfo& call_info,
-              const OpDef::ArgDef arg,
+              const DataType type,
               const string& input,
               int arg_id, NodeDef* ret) {
     string prefix = call_info.node_name;
@@ -362,9 +356,6 @@ Status CallRewriter::AddRetOp(const CallInfo& call_info,
     ret->set_op(kRetOp);
     ret->set_name(AddPrefixToNodeName(ret_name, prefix));
     ret->add_input(input);
-
-    DataType type;
-    TF_RETURN_IF_ERROR(CopyArgType(arg, call_info.attr, &type));
 
     auto& attr = *ret->mutable_attr();
     attr["T"].set_type(type);
