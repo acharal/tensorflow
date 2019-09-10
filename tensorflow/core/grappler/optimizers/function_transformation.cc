@@ -726,10 +726,10 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
             AttrSlice(&func_def.attr()), ctx.Libdef(), 
             ctx.GetFuncSig(), &fbody));
 
-    FunctionBody* fgrad_body = AmendSymbolicGradient(*fbody);
-    GraphDef fgrad_graphdef;
-    fgrad_body->graph->ToGraphDef(&fgrad_graphdef);
-    printf("\n\nGradient definition %s:\n\n", SummarizeGraphDef(fgrad_graphdef).c_str());
+    FunctionBody* gbody = AmendSymbolicGradient(fbody);
+    GraphDef g_graph_def;
+    fgrad_body->graph->ToGraphDef(&g_graph_def);
+    printf("\n\nGradient definition %s:\n\n", SummarizeGraphDef(g_graph_def).c_str());
 
     /******************************************************************************************************/
     EventsWriter writer("Gradient_");
@@ -743,7 +743,7 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
                 "Failed to allocate memory to serialize message of type '" ,
                 fgrad_graphdef.GetTypeName(), "' and size ", proto_size);
     }
-    fgrad_graphdef.SerializeToArray(buf, proto_size);
+    g_graph_def.SerializeToArray(buf, proto_size);
     const void* bf = buf;
     event.set_graph_def(bf, proto_size);
     writer.WriteEvent(event);
