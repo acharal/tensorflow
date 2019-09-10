@@ -537,7 +537,7 @@ Status InlineFunction(const FunctionDef& func_def,
 
     func_info.outputs.clear();
     func_info.outputs.resize(item->fetch.size());
-    func_info.output_def.resize(item->fetch.size());
+    //func_info.output_def.resize(item->fetch.size());
 
     for (unsigned int i = 0; i < item->fetch.size(); i++) {
         func_info.outputs[i] = AddPrefixToNodeName(item->fetch[i], prefix);
