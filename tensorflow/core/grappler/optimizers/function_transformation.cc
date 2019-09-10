@@ -559,8 +559,6 @@ Status InlineFunction(const FunctionDef& func_def,
 /* In functions.cc */
 
 static constexpr const char* const kNodeLabel = "Func";
-static constexpr const char* const kFuncAttr =
-    FunctionLibraryDefinition::kFuncAttr;
 
 // Represents the index-th output of a node.
 struct Endpoint {
