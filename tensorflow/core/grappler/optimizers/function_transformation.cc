@@ -153,9 +153,9 @@ struct CallInfo {
     std::unordered_map<string, AttrValue> f_attr;
     std::unordered_map<string, AttrValue> g_attr;
 
-    string name() { return f_call->name(); }
-    string f_name() { return f_call->op(); }
-    string device() { return f_call->device(); }
+    string name() const { return f_call->name(); }
+    string f_name() const { return f_call->op(); }
+    string device() const { return f_call->device(); }
     bool hasGradient() { return (g_call != nullptr); }
 };
 
