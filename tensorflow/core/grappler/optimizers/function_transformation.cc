@@ -229,10 +229,10 @@ class CallRewriter {
     inline int GetCallId(const NodeDef& node) { int call_id = id; id++; return call_id; }
 
   private:
-    Status AddCallOp(const CallInfo& call_info, const OpDef::ArgDef arg,
+    Status AddCallOp(const CallInfo& call_info, const DataType& type,
                    const string& input, int arg_id, NodeDef* call_node);
 
-    Status AddRetOp(const CallInfo& call_info, const OpDef::ArgDef arg,
+    Status AddRetOp(const CallInfo& call_info, const DataType& type,
                   const string& input, int arg_id, NodeDef* ret_node);
 
     Status ConnectInput(NodeDef* from, NodeDef* to);
@@ -327,7 +327,7 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
 }
 
 Status CallRewriter::AddCallOp(const CallInfo& call_info,
-               const DataType type,
+               const DataType& type,
                const string& input,
                int arg_id, NodeDef* call) {
     string prefix = call_info.node_name;
@@ -348,7 +348,7 @@ Status CallRewriter::AddCallOp(const CallInfo& call_info,
 }
 
 Status CallRewriter::AddRetOp(const CallInfo& call_info,
-              const DataType type,
+              const DataType& type,
               const string& input,
               int arg_id, NodeDef* ret) {
     string prefix = call_info.node_name;
@@ -437,9 +437,9 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
         out->set_name(call_info.node_name);
         out->set_device(call_info.device);
         AttrValue::ListValue* type_list = (*out->mutable_attr())["T"].mutable_list();
-        for (const OpDef::ArgDef& arg : func_info.output_def) {
-          TF_RETURN_IF_ERROR(CopyArgType(arg, call_info.attr, type_list));
-        }
+        //for (const OpDef::ArgDef& arg : func_info.output_def) {
+        //  TF_RETURN_IF_ERROR(CopyArgType(arg, call_info.attr, type_list));
+        //}
         for (unsigned int i = 0; i < func_info.outputs.size(); i++) {
             *out->add_input() = ret_nodes[i]->name();
         }
