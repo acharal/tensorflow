@@ -153,9 +153,9 @@ struct CallInfo {
     std::unordered_map<string, AttrValue> f_attr;
     std::unordered_map<string, AttrValue> g_attr;
 
-    string& name() const { return f_call->name(); }
-    string& f_name() const { return f_call->op(); }
-    string& device() const { return f_call->device(); }
+    string name() { return f_call->name(); }
+    string f_name() { return f_call->op(); }
+    string device() { return f_call->device(); }
     bool hasGradient() { return (g_call != nullptr); }
 };
 
@@ -271,7 +271,7 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
             if (func_def != nullptr) {
                 CallInfo& call = call_map[node.name()];
                 call.call_id = GetCallId(node);
-                call.node  = &node;
+                call.f_call  = &node;
 
                 std::unordered_map<string, AttrValue> call_attr(node.attr().begin(), node.attr().end());
                 call.f_attr = call_attr;
@@ -435,7 +435,7 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
             ReplaceOutput(call_info.name(), ret_nodes[0]->name());
         }
     }
-    printf("Mark call %s (function %s) as transformed\n", call_info.node().c_str(), call_info.f_name().c_str());
+    printf("Mark call %s (function %s) as transformed\n", call_info.name().c_str(), call_info.f_name().c_str());
     MarkCallTransformed(call_info);
 
     return Status::OK();
@@ -856,7 +856,7 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
               printf("Error: %s\n", s.error_message().c_str());
               return s;
             }
-            printf("After transforming call %s:\n %s\n", call.function_name.c_str(), SummarizeGraphDef(*output).c_str());
+            printf("After transforming call %s:\n %s\n", call.f_name().c_str(), SummarizeGraphDef(*output).c_str());
         }
         calls.clear();
         call_rewriter.Flush();
