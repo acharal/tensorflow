@@ -555,7 +555,17 @@ Status InlineFunction(const FunctionDef& func_def,
     return Status::OK();
 }
 
+
 /* In functions.cc */
+
+static constexpr const char* const kArgOp = "_Arg";
+static constexpr const char* const kRetOp = "_Retval";
+static constexpr const char* const kGradientOp =
+    FunctionLibraryDefinition::kGradientOp;
+static constexpr const char* const kNodeLabel = "Func";
+static constexpr const char* const kFuncAttr =
+    FunctionLibraryDefinition::kFuncAttr;
+
 // Represents the index-th output of a node.
 struct Endpoint {
   Node* node;
