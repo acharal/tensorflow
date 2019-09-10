@@ -49,15 +49,16 @@ static constexpr const char* const kFuncAttr =
     FunctionLibraryDefinition::kFuncAttr;
 
 struct FuncInfo {
-  gtl::ArraySlice<string> fetch;
   std::vector<NodeDef*> inputs;
-  std::vector<OpDef::ArgDef> input_def;
   std::vector<string> outputs;
-  std::vector<OpDef::ArgDef> output_def;
-  std::vector<NodeDef*> grad_inputs;
-  std::vector<OpDef::ArgDef> grad_input_def;
-  std::vector<string> grad_outputs;
-  std::vector<OpDef::ArgDef> grad_output_def;
+  std::vector<NodeDef*> delta_inputs;
+  std::vector<string> delta_outputs;
+  DataTypeVector input_types;
+  DataTypeVector output_types;
+//  std::vector<OpDef::ArgDef> input_def;
+//  std::vector<OpDef::ArgDef> output_def;
+//  std::vector<OpDef::ArgDef> grad_input_def;
+//  std::vector<OpDef::ArgDef> grad_output_def;
 };
 
 // same with commit b691c0 (possibly)
@@ -404,7 +405,7 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
     for (unsigned int arg_num = 0; arg_num < func_info.inputs.size(); arg_num++) {
         call_nodes[arg_num] = graph->add_node();
         AddCallOp(call_info,
-                func_info.input_def[arg_num],
+                func_info.input_types[arg_num],
                 call_info.input_nodes[arg_num],
                 arg_num,
                 call_nodes[arg_num]);
@@ -419,7 +420,7 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
     for (unsigned int out_port = 0; out_port < func_info.outputs.size(); out_port++) {
         ret_nodes[out_port] = graph->add_node();
         AddRetOp(call_info,
-               func_info.output_def[out_port],
+               func_info.output_types[out_port],
                func_info.outputs[out_port],
                out_port,
                ret_nodes[out_port]);
@@ -485,7 +486,7 @@ Status InlineFunction(const FunctionDef& func_def,
         input_nodes[arg.name()] = i;
     }
     func_info.inputs.resize(arg_size);
-    func_info.input_def.resize(arg_size);
+    func_info.input_types.resize(arg_size);
     for (int i = 0; i < arg_size; ++i) {
         const OpDef::ArgDef& arg = func_def.signature().input_arg(i);
         NodeDef* merge = graph->add_node();
@@ -499,7 +500,7 @@ Status InlineFunction(const FunctionDef& func_def,
         attr["T"].set_type(type);
 
         func_info.inputs[i] = merge;
-        func_info.input_def[i] = arg;
+        func_info.input_types[i] = type;
     }
 
     // prefix each node in function graph and place it to the global graph.
@@ -549,7 +550,7 @@ Status InlineFunction(const FunctionDef& func_def,
 
     for (unsigned int i = 0; i < item->fetch.size(); i++) {
         func_info.outputs[i] = AddPrefixToNodeName(item->fetch[i], prefix);
-        func_info.output_def[i] = func_def.signature().output_arg(i);
+        //func_info.output_def[i] = func_def.signature().output_arg(i);
     }
 
     return Status::OK();
@@ -748,42 +749,7 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
     event.set_graph_def(bf, proto_size);
     writer.WriteEvent(event);
     /******************************************************************************************************/
-
-    /*
-    // Populate 'y_node_outputs_' with node function body outputs.
-    // Populate 'y_grad_nodes' with initial gradient nodes for each return node of
-    // the original function body (these will be 'arg' nodes in the function
-    // gradient body).
-    std::vector<NodeOut> y_node_outputs;
-    y_node_outputs.reserve(num_y);
-    std::vector<NodeOut> y_grad_node_outputs;
-    y_grad_node_outputs.reserve(num_y);
-    for (int i = 0; i < num_y; ++i) {
-        Node* y = gbody_->ret_nodes[i];
-        y_node_outputs.push_back({y, 0});
-        DCHECK_EQ(y->type_string(), kRetOp);
-        const DataType dtype = y->input_type(0);
-        const int index = static_cast<int>(gbody_->arg_nodes.size());
-        Node* dy = AddArg(g, dtype, index);
-        gbody_->arg_types.push_back(dtype);
-        gbody_->arg_nodes.push_back(dy);
-        y_grad_node_outputs.push_back({dy, 0});
-    }
-
-    const size_t num_x = fbody_->arg_nodes.size();
-    std::vector<NodeOut> x_node_outputs;
-    x_node_outputs.reserve(num_x);
-    for (size_t i = 0; i < fbody_->arg_nodes.size(); ++i) {
-        x_node_outputs.push_back({gbody_->arg_nodes[i], 0});
-    }
-    */
-//    std::vector<NodeOut> x_grad_node_outputs;
-//    TF_CHECK_OK(AddSymbolicGradients(y_node_outputs, x_node_outputs,
-//                                   y_grad_node_outputs, &x_grad_node_outputs,
-//                                   graphptr.get()));
-//    GraphDef output_graph_def;
-//    graphptr->ToGraphDef(&output_graph_def);
-//
+   
 //    int arg_size = func_def.signature().input_arg_size();
 //    // create an inverse map of arg to provide name -> argument number
 //    std::unordered_map<string, int> input_nodes;
