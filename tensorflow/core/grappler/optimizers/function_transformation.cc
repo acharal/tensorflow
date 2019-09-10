@@ -558,10 +558,6 @@ Status InlineFunction(const FunctionDef& func_def,
 
 /* In functions.cc */
 
-static constexpr const char* const kArgOp = "_Arg";
-static constexpr const char* const kRetOp = "_Retval";
-static constexpr const char* const kGradientOp =
-    FunctionLibraryDefinition::kGradientOp;
 static constexpr const char* const kNodeLabel = "Func";
 static constexpr const char* const kFuncAttr =
     FunctionLibraryDefinition::kFuncAttr;
@@ -589,7 +585,7 @@ static Node* AddArg(Graph* g, DataType dtype, int index) {
   DCHECK_LT(dtype, DT_FLOAT_REF);
   NodeDef ndef;
   ndef.set_name(g->NewName(kNodeLabel));
-  ndef.set_op(kArgOp);
+  ndef.set_op("_Arg");
   AddNodeAttr("T", dtype, &ndef);
   AddNodeAttr("index", index, &ndef);
   Status s;
@@ -603,7 +599,7 @@ static Node* AddRet(Graph* g, Endpoint input, int index) {
   DCHECK_LT(input.dtype(), DT_FLOAT_REF);
   NodeDef ndef;
   ndef.set_name(g->NewName(kNodeLabel));
-  ndef.set_op(kRetOp);
+  ndef.set_op("_Retval");
   ndef.add_input(input.name());
   AddNodeAttr("T", input.dtype(), &ndef);
   AddNodeAttr("index", index, &ndef);
