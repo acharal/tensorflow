@@ -51,15 +51,16 @@ static constexpr const char* const kFuncAttr =
     FunctionLibraryDefinition::kFuncAttr;
 
 struct FuncInfo {
-  gtl::ArraySlice<string> fetch;
   std::vector<NodeDef*> inputs;
-  std::vector<OpDef::ArgDef> input_def;
   std::vector<string> outputs;
-  std::vector<OpDef::ArgDef> output_def;
-  std::vector<NodeDef*> grad_inputs;
-  std::vector<OpDef::ArgDef> grad_input_def;
-  std::vector<string> grad_outputs;
-  std::vector<OpDef::ArgDef> grad_output_def;
+  std::vector<NodeDef*> delta_inputs;
+  std::vector<string> delta_outputs;
+  DataTypeVector input_types;
+  DataTypeVector output_types;
+//  std::vector<OpDef::ArgDef> input_def;
+//  std::vector<OpDef::ArgDef> output_def;
+//  std::vector<OpDef::ArgDef> grad_input_def;
+//  std::vector<OpDef::ArgDef> grad_output_def;
 };
 
 // same with commit b691c0 (possibly)
@@ -154,34 +155,21 @@ Status CopyArgType(const OpDef::ArgDef& arg,
     return Status::OK();
 }
 
-// Copy input/output argument type to the type_list. Return error if argument
-// type is not explicitly defined, and not specified in function attributes.
-Status CopyArgType(const OpDef::ArgDef& arg,
-                   const std::unordered_map<string, AttrValue>& func_attr,
-                   AttrValue::ListValue* type_list) {
-    if (arg.type() != DT_INVALID) {
-      type_list->add_type(arg.type());
-    } else {
-      auto it = func_attr.find(arg.type_attr());
-      if (it == func_attr.end() || it->second.type() == DT_INVALID) {
-        return errors::InvalidArgument("Invalid argument ", arg.name());
-      }
-      type_list->add_type(it->second.type());
-    }
-    return Status::OK();
-}
-
 struct CallInfo {
     int call_id;
-    NodeDef* node;
-    NodeDef* grad_node;
-    string node_name;
-    string function_name;
-    string device;
+
+    NodeDef* f_call = nullptr;
+    NodeDef* g_call = nullptr;
+    
     std::vector<string> input_nodes;
-    std::vector<string> grad_input_nodes;
-    std::unordered_map<string, AttrValue> attr;
-    std::unordered_map<string, AttrValue> grad_attr;
+    std::vector<string> g_input_nodes;
+    std::unordered_map<string, AttrValue> f_attr;
+    std::unordered_map<string, AttrValue> g_attr;
+
+    string name() const { return f_call->name(); }
+    string f_name() const { return f_call->op(); }
+    string device() const { return f_call->device(); }
+    bool hasGradient() { return (g_call != nullptr); }
 };
 
 class CallRewriter {
@@ -241,10 +229,10 @@ class CallRewriter {
     inline int GetCallId(const NodeDef& node) { int call_id = id; id++; return call_id; }
 
   private:
-    Status AddCallOp(const CallInfo& call_info, const OpDef::ArgDef arg,
+    Status AddCallOp(const CallInfo& call_info, const DataType& type,
                    const string& input, int arg_id, NodeDef* call_node);
 
-    Status AddRetOp(const CallInfo& call_info, const OpDef::ArgDef arg,
+    Status AddRetOp(const CallInfo& call_info, const DataType& type,
                   const string& input, int arg_id, NodeDef* ret_node);
 
     Status ConnectInput(NodeDef* from, NodeDef* to);
@@ -263,7 +251,7 @@ class CallRewriter {
     }
 
     void MarkCallTransformed(CallInfo& call_info) {
-        NodeDef* node = call_info.node;
+        NodeDef* node = call_info.f_call;
         node->clear_input();
         node->set_op("NoOp");
         node->set_name(AddPrefixToNodeName(node->name(), "$MarkToDelete$"));
@@ -296,13 +284,10 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
             if (func_def != nullptr) {
                 CallInfo& call = call_map[node.name()];
                 call.call_id = GetCallId(node);
-                call.node_name = node.name();
-                call.function_name = node.op();
-                call.node = &node;
-                call.device = node.device();
+                call.f_call  = &node;
 
                 std::unordered_map<string, AttrValue> call_attr(node.attr().begin(), node.attr().end());
-                call.attr = call_attr;
+                call.f_attr = call_attr;
 
                 int input_size = func_def->signature().input_arg_size();
                 call.input_nodes.resize(input_size);
@@ -322,14 +307,14 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
         CallInfo& fwd_call = fwd_call_it->second;
 
         std::unordered_map<string, AttrValue> grad_call_attr(ngrad->attr().begin(), ngrad->attr().end());
-        fwd_call.grad_attr = grad_call_attr;
+        fwd_call.g_attr = grad_call_attr;
 
         int grad_input_size = ngrad->input_size();
-        fwd_call.grad_input_nodes.resize(grad_input_size);
+        fwd_call.g_input_nodes.resize(grad_input_size);
         for (int i = 0; i < grad_input_size; i++) {
-            fwd_call.grad_input_nodes[i] = ngrad->input(i);
+            fwd_call.g_input_nodes[i] = ngrad->input(i);
         }
-        fwd_call.grad_node = ngrad;
+        fwd_call.g_call = ngrad;
     }
 
     for (const auto& it : call_map) {
@@ -339,25 +324,19 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
 }
 
 Status CallRewriter::AddCallOp(const CallInfo& call_info,
-               const OpDef::ArgDef arg,
+               const DataType& type,
                const string& input,
                int arg_id, NodeDef* call) {
-    string prefix = call_info.node_name;
+    string prefix = call_info.name();
     string call_name = strings::StrCat("Call", "_", arg_id);
     call->set_op(kCallOp);
     call->set_name(AddPrefixToNodeName(call_name, prefix));
     //call->set_device(node.device());
     call->add_input(input);
 
-    DataType type;
-    TF_RETURN_IF_ERROR(CopyArgType(arg, call_info.attr, &type));
-
     auto& attr = *call->mutable_attr();
-
-    //SetArgType(arg, call_info.attr, attr);
-
     attr["T"].set_type(type);
-    attr["frame_name"].set_s(call_info.function_name);
+    attr["frame_name"].set_s(call_info.f_name());
     attr["call_id"].set_i(call_info.call_id);
     attr["arg_id"].set_i(arg_id);
     attr["is_constant"].set_b(false);
@@ -366,21 +345,18 @@ Status CallRewriter::AddCallOp(const CallInfo& call_info,
 }
 
 Status CallRewriter::AddRetOp(const CallInfo& call_info,
-              const OpDef::ArgDef arg,
+              const DataType& type,
               const string& input,
               int arg_id, NodeDef* ret) {
-    string prefix = call_info.node_name;
+    string prefix = call_info.name();
     string ret_name = strings::StrCat("Ret", "_", arg_id);
     ret->set_op(kRetOp);
     ret->set_name(AddPrefixToNodeName(ret_name, prefix));
     ret->add_input(input);
 
-    DataType type;
-    TF_RETURN_IF_ERROR(CopyArgType(arg, call_info.attr, &type));
-
     auto& attr = *ret->mutable_attr();
     attr["T"].set_type(type);
-    attr["frame_name"].set_s(call_info.function_name);
+    attr["frame_name"].set_s(call_info.f_name());
     attr["call_id"].set_i(call_info.call_id);
     attr["arg_id"].set_i(arg_id);
 
@@ -406,7 +382,7 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
 
     // inlines the body of a function and provides a struct with func_info
     TF_RETURN_IF_ERROR(FindCompatibleOrInlineFunction(
-        call_info.function_name, call_info.attr, call_info.device, graph, func_info));
+        call_info.f_name(), call_info.f_attr, call_info.device(), graph, func_info));
 
     CHECK_EQ(call_info.input_nodes.size(), func_info.inputs.size());
 
@@ -417,12 +393,12 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
     for (unsigned int arg_num = 0; arg_num < func_info.inputs.size(); arg_num++) {
         call_nodes[arg_num] = graph->add_node();
         AddCallOp(call_info,
-                func_info.input_def[arg_num],
+                func_info.input_types[arg_num],
                 call_info.input_nodes[arg_num],
                 arg_num,
                 call_nodes[arg_num]);
 
-        call_nodes[arg_num]->set_device(call_info.device);
+        call_nodes[arg_num]->set_device(call_info.device());
 
         // connect the input of the inlined function to feed from call.
         TF_RETURN_IF_ERROR(ConnectInput(call_nodes[arg_num], func_info.inputs[arg_num]));
@@ -432,11 +408,11 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
     for (unsigned int out_port = 0; out_port < func_info.outputs.size(); out_port++) {
         ret_nodes[out_port] = graph->add_node();
         AddRetOp(call_info,
-               func_info.output_def[out_port],
+               func_info.output_types[out_port],
                func_info.outputs[out_port],
                out_port,
                ret_nodes[out_port]);
-        ret_nodes[out_port]->set_device(call_info.device);
+        ret_nodes[out_port]->set_device(call_info.device());
     }
 
     // for each call create a control dependency to each return
@@ -446,7 +422,7 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
         *(ret->add_input()) = AsControlDependency(call->name());
     }
 
-    if (ShouldPreserveOutputs(call_info.node_name)) {
+    if (ShouldPreserveOutputs(call_info.name())) {
         // create an IdentityN with the same name of the initial function call
         // so as to preserve the naming of the outputs.
         // we re-use the initial node and we change (a) the op to IdentityN and
@@ -455,24 +431,24 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
         // The IdentityN node will sync the outputs and therefore may result to performance degradation.
         NodeDef* out = graph->add_node();
         out->set_op(kIdentityNOp);
-        out->set_name(call_info.node_name);
-        out->set_device(call_info.device);
+        out->set_name(call_info.name());
+        out->set_device(call_info.device());
         AttrValue::ListValue* type_list = (*out->mutable_attr())["T"].mutable_list();
-        for (const OpDef::ArgDef& arg : func_info.output_def) {
-          TF_RETURN_IF_ERROR(CopyArgType(arg, call_info.attr, type_list));
+        for (const DataType& type : func_info.output_types) {
+          type_list->add_type(type);
         }
         for (unsigned int i = 0; i < func_info.outputs.size(); i++) {
             *out->add_input() = ret_nodes[i]->name();
         }
     } else {
         for (unsigned int out_port = 0; out_port < func_info.outputs.size(); out_port++) {
-            ReplaceOutput(strings::StrCat(call_info.node_name, ":", out_port), ret_nodes[out_port]->name());
+            ReplaceOutput(strings::StrCat(call_info.name(), ":", out_port), ret_nodes[out_port]->name());
         }
         if (func_info.outputs.size() == 1) {
-            ReplaceOutput(call_info.node_name, ret_nodes[0]->name());
+            ReplaceOutput(call_info.name(), ret_nodes[0]->name());
         }
     }
-    printf("Mark call %s (function %s) as transformed\n", call_info.node_name.c_str(), call_info.function_name.c_str());
+    printf("Mark call %s (function %s) as transformed\n", call_info.name().c_str(), call_info.f_name().c_str());
     MarkCallTransformed(call_info);
 
     return Status::OK();
@@ -498,7 +474,7 @@ Status InlineFunction(const FunctionDef& func_def,
         input_nodes[arg.name()] = i;
     }
     func_info.inputs.resize(arg_size);
-    func_info.input_def.resize(arg_size);
+    func_info.input_types.resize(arg_size);
     for (int i = 0; i < arg_size; ++i) {
         const OpDef::ArgDef& arg = func_def.signature().input_arg(i);
         NodeDef* merge = graph->add_node();
@@ -512,7 +488,7 @@ Status InlineFunction(const FunctionDef& func_def,
         attr["T"].set_type(type);
 
         func_info.inputs[i] = merge;
-        func_info.input_def[i] = arg;
+        func_info.input_types[i] = type;
     }
 
     // prefix each node in function graph and place it to the global graph.
@@ -558,11 +534,13 @@ Status InlineFunction(const FunctionDef& func_def,
 
     func_info.outputs.clear();
     func_info.outputs.resize(item->fetch.size());
-    func_info.output_def.resize(item->fetch.size());
+    func_info.output_types.resize(item->fetch.size());
 
     for (unsigned int i = 0; i < item->fetch.size(); i++) {
         func_info.outputs[i] = AddPrefixToNodeName(item->fetch[i], prefix);
-        func_info.output_def[i] = func_def.signature().output_arg(i);
+        DataType type;
+        TF_RETURN_IF_ERROR(CopyArgType(func_def.signature().output_arg(i), func_attr, &type));
+        func_info.output_types[i] = type;
     }
 
     return Status::OK();
@@ -761,42 +739,7 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
     event.set_graph_def(bf, proto_size);
     writer.WriteEvent(event);
     /******************************************************************************************************/
-
-    /*
-    // Populate 'y_node_outputs_' with node function body outputs.
-    // Populate 'y_grad_nodes' with initial gradient nodes for each return node of
-    // the original function body (these will be 'arg' nodes in the function
-    // gradient body).
-    std::vector<NodeOut> y_node_outputs;
-    y_node_outputs.reserve(num_y);
-    std::vector<NodeOut> y_grad_node_outputs;
-    y_grad_node_outputs.reserve(num_y);
-    for (int i = 0; i < num_y; ++i) {
-        Node* y = gbody_->ret_nodes[i];
-        y_node_outputs.push_back({y, 0});
-        DCHECK_EQ(y->type_string(), kRetOp);
-        const DataType dtype = y->input_type(0);
-        const int index = static_cast<int>(gbody_->arg_nodes.size());
-        Node* dy = AddArg(g, dtype, index);
-        gbody_->arg_types.push_back(dtype);
-        gbody_->arg_nodes.push_back(dy);
-        y_grad_node_outputs.push_back({dy, 0});
-    }
-
-    const size_t num_x = fbody_->arg_nodes.size();
-    std::vector<NodeOut> x_node_outputs;
-    x_node_outputs.reserve(num_x);
-    for (size_t i = 0; i < fbody_->arg_nodes.size(); ++i) {
-        x_node_outputs.push_back({gbody_->arg_nodes[i], 0});
-    }
-    */
-//    std::vector<NodeOut> x_grad_node_outputs;
-//    TF_CHECK_OK(AddSymbolicGradients(y_node_outputs, x_node_outputs,
-//                                   y_grad_node_outputs, &x_grad_node_outputs,
-//                                   graphptr.get()));
-//    GraphDef output_graph_def;
-//    graphptr->ToGraphDef(&output_graph_def);
-//
+   
 //    int arg_size = func_def.signature().input_arg_size();
 //    // create an inverse map of arg to provide name -> argument number
 //    std::unordered_map<string, int> input_nodes;
@@ -926,7 +869,7 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
               printf("Error: %s\n", s.error_message().c_str());
               return s;
             }
-            printf("After transforming call %s:\n %s\n", call.function_name.c_str(), SummarizeGraphDef(*output).c_str());
+            printf("After transforming call %s:\n %s\n", call.f_name().c_str(), SummarizeGraphDef(*output).c_str());
         }
         calls.clear();
         call_rewriter.Flush();
@@ -960,7 +903,7 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
               "Failed to allocate memory to serialize message of type '" ,
               output->GetTypeName(), "' and size ", proto_size);
     }
-  output->SerializeToArray(buf, proto_size);
+    output->SerializeToArray(buf, proto_size);
     const void* bf = buf;
     event.set_graph_def(bf, proto_size);
     writer.WriteEvent(event);
