@@ -719,22 +719,6 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
                       const std::unordered_map<string, AttrValue>& func_attr,
                       const string& device,
                       GraphDef* graph, FuncInfo& func_info) {
-    std::unique_ptr<GrapplerItem> item = GrapplerItemFromFunctionDef(func_def, func_attr, ctx.Library());
-    string prefix = func_def.signature().name();
-
-    if (!item) {
-        return errors::InvalidArgument(
-                 "Failed to inline function ", func_def.signature().name());
-    }
-
-    GraphDef func_graph = item->graph;
-
-    for (NodeDef& n : *func_graph.mutable_node()) {
-        for (string& input : *n.mutable_input()) {
-            input = AddPrefixToNodeName(input, prefix);
-        }
-        n.set_name(AddPrefixToNodeName(n.name(), prefix));
-    }
 
     // Get func_def's gradient graph
     FunctionBody* fbody;
@@ -742,7 +726,7 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
             AttrSlice(&func_def.attr()), ctx.Libdef(), 
             ctx.GetFuncSig(), &fbody));
 
-    FunctionBody* fgrad_body = SymbolicGradient(*fbody);
+    FunctionBody* fgrad_body = AmendSymbolicGradient(*fbody);
     GraphDef fgrad_graphdef;
     fgrad_body->graph->ToGraphDef(&fgrad_graphdef);
     printf("\n\nGradient definition %s:\n\n", SummarizeGraphDef(fgrad_graphdef).c_str());
@@ -764,9 +748,6 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
     event.set_graph_def(bf, proto_size);
     writer.WriteEvent(event);
     /******************************************************************************************************/
-
-
-
 
 //    GraphConstructorOptions graph_ctor_opts;
 //    graph_ctor_opts.allow_internal_ops = true;
