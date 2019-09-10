@@ -142,34 +142,21 @@ Status CopyArgType(const OpDef::ArgDef& arg,
     return Status::OK();
 }
 
-// Copy input/output argument type to the type_list. Return error if argument
-// type is not explicitly defined, and not specified in function attributes.
-Status CopyArgType(const OpDef::ArgDef& arg,
-                   const std::unordered_map<string, AttrValue>& func_attr,
-                   AttrValue::ListValue* type_list) {
-    if (arg.type() != DT_INVALID) {
-      type_list->add_type(arg.type());
-    } else {
-      auto it = func_attr.find(arg.type_attr());
-      if (it == func_attr.end() || it->second.type() == DT_INVALID) {
-        return errors::InvalidArgument("Invalid argument ", arg.name());
-      }
-      type_list->add_type(it->second.type());
-    }
-    return Status::OK();
-}
-
 struct CallInfo {
     int call_id;
-    NodeDef* node;
-    NodeDef* grad_node;
-    string node_name;
-    string function_name;
-    string device;
+
+    NodeDef* f_call = nullptr;
+    NodeDef* g_call = nullptr;
+    
     std::vector<string> input_nodes;
     std::vector<string> grad_input_nodes;
-    std::unordered_map<string, AttrValue> attr;
-    std::unordered_map<string, AttrValue> grad_attr;
+    std::unordered_map<string, AttrValue> f_attr;
+    std::unordered_map<string, AttrValue> g_attr;
+
+    string& name() const { return node->name(); }
+    string& f_name() const { return node->op(); }
+    string& device() const { return node->device(); }
+    bool hasGradient() { return (g_call != nullptr); }
 };
 
 class CallRewriter {
@@ -251,7 +238,7 @@ class CallRewriter {
     }
 
     void MarkCallTransformed(CallInfo& call_info) {
-        NodeDef* node = call_info.node;
+        NodeDef* node = call_info.f_call;
         node->clear_input();
         node->set_op("NoOp");
         node->set_name(AddPrefixToNodeName(node->name(), "$MarkToDelete$"));
@@ -330,7 +317,7 @@ Status CallRewriter::AddCallOp(const CallInfo& call_info,
                const DataType& type,
                const string& input,
                int arg_id, NodeDef* call) {
-    string prefix = call_info.node_name;
+    string prefix = call_info.name();
     string call_name = strings::StrCat("Call", "_", arg_id);
     call->set_op(kCallOp);
     call->set_name(AddPrefixToNodeName(call_name, prefix));
@@ -339,7 +326,7 @@ Status CallRewriter::AddCallOp(const CallInfo& call_info,
 
     auto& attr = *call->mutable_attr();
     attr["T"].set_type(type);
-    attr["frame_name"].set_s(call_info.function_name);
+    attr["frame_name"].set_s(call_info.f_name());
     attr["call_id"].set_i(call_info.call_id);
     attr["arg_id"].set_i(arg_id);
     attr["is_constant"].set_b(false);
@@ -351,7 +338,7 @@ Status CallRewriter::AddRetOp(const CallInfo& call_info,
               const DataType& type,
               const string& input,
               int arg_id, NodeDef* ret) {
-    string prefix = call_info.node_name;
+    string prefix = call_info.name();
     string ret_name = strings::StrCat("Ret", "_", arg_id);
     ret->set_op(kRetOp);
     ret->set_name(AddPrefixToNodeName(ret_name, prefix));
@@ -359,7 +346,7 @@ Status CallRewriter::AddRetOp(const CallInfo& call_info,
 
     auto& attr = *ret->mutable_attr();
     attr["T"].set_type(type);
-    attr["frame_name"].set_s(call_info.function_name);
+    attr["frame_name"].set_s(call_info.f_name());
     attr["call_id"].set_i(call_info.call_id);
     attr["arg_id"].set_i(arg_id);
 
@@ -385,7 +372,7 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
 
     // inlines the body of a function and provides a struct with func_info
     TF_RETURN_IF_ERROR(FindCompatibleOrInlineFunction(
-        call_info.function_name, call_info.attr, call_info.device, graph, func_info));
+        call_info.f_name(), call_info.f_attr, call_info.device(), graph, func_info));
 
     CHECK_EQ(call_info.input_nodes.size(), func_info.inputs.size());
 
@@ -401,7 +388,7 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
                 arg_num,
                 call_nodes[arg_num]);
 
-        call_nodes[arg_num]->set_device(call_info.device);
+        call_nodes[arg_num]->set_device(call_info.device());
 
         // connect the input of the inlined function to feed from call.
         TF_RETURN_IF_ERROR(ConnectInput(call_nodes[arg_num], func_info.inputs[arg_num]));
@@ -415,7 +402,7 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
                func_info.outputs[out_port],
                out_port,
                ret_nodes[out_port]);
-        ret_nodes[out_port]->set_device(call_info.device);
+        ret_nodes[out_port]->set_device(call_info.device());
     }
 
     // for each call create a control dependency to each return
@@ -425,7 +412,7 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
         *(ret->add_input()) = AsControlDependency(call->name());
     }
 
-    if (ShouldPreserveOutputs(call_info.node_name)) {
+    if (ShouldPreserveOutputs(call_info.name())) {
         // create an IdentityN with the same name of the initial function call
         // so as to preserve the naming of the outputs.
         // we re-use the initial node and we change (a) the op to IdentityN and
@@ -434,8 +421,8 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
         // The IdentityN node will sync the outputs and therefore may result to performance degradation.
         NodeDef* out = graph->add_node();
         out->set_op(kIdentityNOp);
-        out->set_name(call_info.node_name);
-        out->set_device(call_info.device);
+        out->set_name(call_info.name());
+        out->set_device(call_info.device());
         AttrValue::ListValue* type_list = (*out->mutable_attr())["T"].mutable_list();
         for (const DataType& type : func_info.output_types) {
           type_list->add_type(type);
@@ -445,13 +432,13 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
         }
     } else {
         for (unsigned int out_port = 0; out_port < func_info.outputs.size(); out_port++) {
-            ReplaceOutput(strings::StrCat(call_info.node_name, ":", out_port), ret_nodes[out_port]->name());
+            ReplaceOutput(strings::StrCat(call_info.name(), ":", out_port), ret_nodes[out_port]->name());
         }
         if (func_info.outputs.size() == 1) {
-            ReplaceOutput(call_info.node_name, ret_nodes[0]->name());
+            ReplaceOutput(call_info.name(), ret_nodes[0]->name());
         }
     }
-    printf("Mark call %s (function %s) as transformed\n", call_info.node_name.c_str(), call_info.function_name.c_str());
+    printf("Mark call %s (function %s) as transformed\n", call_info.node().c_str(), call_info.f_name().c_str());
     MarkCallTransformed(call_info);
 
     return Status::OK();
@@ -906,7 +893,7 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
               "Failed to allocate memory to serialize message of type '" ,
               output->GetTypeName(), "' and size ", proto_size);
     }
-  output->SerializeToArray(buf, proto_size);
+    output->SerializeToArray(buf, proto_size);
     const void* bf = buf;
     event.set_graph_def(bf, proto_size);
     writer.WriteEvent(event);
