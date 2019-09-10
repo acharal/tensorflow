@@ -626,6 +626,20 @@ cc_library(
 )
 
 cc_library(
+    name = "core_function",
+    visibility = ["//visibility:public"],
+    hdrs = [
+        "common_runtime/function.h",
+        "graph/gradients.h",
+        "common_runtime/device_mgr.h",
+        "common_runtime/process_function_library_runtime.h",
+    ],
+    deps = [
+        ":core_cpu_base",
+    ],
+)
+
+cc_library(
     name = "word2vec_ops",
     srcs = ["ops/word2vec_ops.cc"],
     linkstatic = 1,

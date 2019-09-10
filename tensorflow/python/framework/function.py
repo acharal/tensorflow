@@ -24,6 +24,7 @@ from __future__ import print_function
 import collections
 import hashlib
 
+from tensorflow.python.ops import gradients_impl
 from tensorflow.core.framework import op_def_pb2
 from tensorflow.core.framework import attr_value_pb2
 from tensorflow.core.framework import function_pb2
@@ -123,6 +124,7 @@ class Defun(object):
     self._func_name = kwargs.pop("func_name", None)
     self._grad_func = kwargs.pop("grad_func", None)
     self._python_grad_func = kwargs.pop("python_grad_func", None)
+    self._create_grad_func = kwargs.pop("create_grad_func", False)
     self._out_names = kwargs.pop("out_names", None)
     self._extra_kwargs = kwargs
 
@@ -163,6 +165,8 @@ class Defun(object):
           self._func_name,
           self._grad_func,
           self._python_grad_func,
+          self._create_grad_func,
+          is_gradient=False,
           out_names=self._out_names,
           **self._extra_kwargs)
 
@@ -173,6 +177,7 @@ class Defun(object):
           self._func_name,
           self._grad_func,
           self._python_grad_func,
+          is_gradient=False,
           out_names=self._out_names,
           **self._extra_kwargs)
 
@@ -184,6 +189,8 @@ class Defun(object):
         self._func_name,
         self._grad_func,
         self._python_grad_func,
+        self._create_grad_func,
+        is_gradient=False,
         out_names=self._out_names,
         **self._extra_kwargs)
 
@@ -261,6 +268,8 @@ class _DefinedFunction(object):
                func_name=None,
                grad_func=None,
                python_grad_func=None,
+               create_grad_func=False,
+               is_gradient=False,
                out_names=None,
                shape_func=None,
                capture_by_value=False,
@@ -296,6 +305,8 @@ class _DefinedFunction(object):
     self._func_name = func_name
     self._grad_func = grad_func
     self._python_grad_func = python_grad_func
+    self._create_grad_func = create_grad_func
+    self._is_gradient = is_gradient
     self._out_names = out_names
     self._shape_func = shape_func
     self._capture_by_value = capture_by_value
@@ -318,6 +329,24 @@ class _DefinedFunction(object):
       argname = argnames[i] if i < len(argnames) else ("arg%d" % i)
       argtype = input_types[i]
       self._args.append((argname, argtype))
+
+    grad_func_name = self._func_name + "Grad"
+    out_names = self._out_names.copy()
+    for (argname, argtype) in self._args:
+      out_names.append("d" + argname)
+
+    if self._create_grad_func:
+      # Todo: check if copy all the args so that they don't get passed by reference
+      self._grad_func = _DefinedFunction(func=func,
+                                         argnames=argnames,
+                                         input_types=input_types,
+                                         func_name=grad_func_name,
+                                         grad_func=None,
+                                         python_grad_func=None,
+                                         create_grad_func=False,
+                                         is_gradient=True,
+                                         out_names=out_names,
+                                         **kwargs)
 
   @property
   def name(self):
@@ -391,7 +420,11 @@ class _DefinedFunction(object):
         inputs.append(argholder)
       # Call func and gather the output tensors.
       with vs.variable_scope("", custom_getter=temp_graph.getvar):
-        outputs = self._func(*inputs)
+        if self._is_gradient:
+          outputs = [self._func(*inputs)]
+          outputs.append(gradients_impl.gradients(outputs, inputs))
+        else:
+          outputs = self._func(*inputs)
 
       # There is no way of distinguishing between a function not returning
       # anything and a function returning None in Python.
@@ -538,10 +571,8 @@ class _DefinedFunction(object):
     return hasher.hexdigest()[:8]
 
   def add_to_graph(self, g):
-    """Adds this function into the graph g."""
     self._create_definition_if_needed()
 
-    # Adds this function into 'g'.
     # pylint: disable=protected-access
     if context.in_graph_mode():
       g._add_function(self)
@@ -585,6 +616,8 @@ class _OverloadedFunction(object):
                func_name=None,
                grad_func=None,
                python_grad_func=None,
+               create_grad_func=True,
+               is_gradient=False,
                out_names=None,
                **kwargs):
     """Creates _DefinedFunction.
@@ -612,6 +645,8 @@ class _OverloadedFunction(object):
     assert grad_func is None or isinstance(grad_func, _OverloadedFunction)
     self._grad_func = grad_func
     self._python_grad_func = python_grad_func
+    self._create_grad_func = create_grad_func
+    self._is_gradient = is_gradient
     self._out_names = out_names
     self._extra_kwargs = kwargs
     self._overload = {}
@@ -641,6 +676,8 @@ class _OverloadedFunction(object):
           name,
           None,
           self._python_grad_func,
+          self._create_grad_func,
+          self._is_gradient,
           out_names=self._out_names,
           **self._extra_kwargs)
       _ = defined.name  # Fully instantiate the function definition.
@@ -869,9 +906,11 @@ def _from_definition(fdef, grad_func=None):
   # Note: FunctionDefs do not include python gradient functions, so if the
   # original _DefinedFunction included one it will not be reflected here.
   python_grad_func = None
+  create_grad_func = False
+  is_gradient = False
   out_names = [arg.name for arg in fdef.signature.output_arg]
   result = _DefinedFunction(func, argnames, input_types, func_name, grad_func,
-                            python_grad_func, out_names)
+                            python_grad_func, create_grad_func, is_gradient, out_names)
   # pylint: disable=protected-access
   if ops._USE_C_API:
     serialized = fdef.SerializeToString()
