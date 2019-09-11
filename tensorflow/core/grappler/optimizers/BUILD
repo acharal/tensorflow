@@ -199,7 +199,6 @@ cc_library(
     deps = [
         ":graph_optimizer",
         "//tensorflow/core:core_cpu_base",
-        "//tensorflow/core:core_function",
         "//tensorflow/core:framework",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core/grappler:grappler_item",
