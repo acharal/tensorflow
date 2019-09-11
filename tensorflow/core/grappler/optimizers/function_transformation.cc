@@ -19,6 +19,8 @@ limitations under the License.
 #include "tensorflow/core/util/events_writer.h"
 
 #include "tensorflow/core/common_runtime/function.h"
+#include "tensorflow/core/framework/node_def_util.h"
+
 
 #include "tensorflow/core/graph/tensor_id.h"
 #include "tensorflow/core/graph/gradients.h"
@@ -91,6 +93,17 @@ class FunctionInliningContext {
     std::unordered_map<string, const FunctionDef*> InliningCandidates(const GrapplerItem& item) const {
       std::unordered_map<string, const FunctionDef*> functions;
       for (const FunctionDef& func : item.graph.library().function()) {
+
+          printf("Func Name: %s\n", func.signature().name().c_str());
+          for (const NodeDef& node : func.node_def()) {
+//              printf("%s\n", node.name().c_str());
+              printf("  %s:\n", SummarizeNodeDef(node).c_str());
+
+          }
+
+
+
+
         // Don't inline functions marked as noinline
         // if (func.attr().count("_noinline") != 0) {
         //   continue;
@@ -695,8 +708,8 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
 
     // Get func_def's gradient graph
     FunctionBody* fbody;
-    TF_RETURN_IF_ERROR(FunctionDefToBodyHelper(func_def, 
-            AttrSlice(&func_def.attr()), ctx.Libdef(), 
+    TF_RETURN_IF_ERROR(FunctionDefToBodyHelper(func_def,
+            AttrSlice(&func_def.attr()), ctx.Libdef(),
             ctx.GetFuncSig(), &fbody));
 
     FunctionBody* gbody = AmendSymbolicGradient(fbody);
