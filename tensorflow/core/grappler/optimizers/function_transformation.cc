@@ -53,14 +53,10 @@ static constexpr const char* const kFuncAttr =
 struct FuncInfo {
   std::vector<NodeDef*> inputs;
   std::vector<string> outputs;
-  std::vector<NodeDef*> delta_inputs;
-  std::vector<string> delta_outputs;
+  std::vector<NodeDef*> dinputs;
+  std::vector<string> doutputs;
   DataTypeVector input_types;
   DataTypeVector output_types;
-//  std::vector<OpDef::ArgDef> input_def;
-//  std::vector<OpDef::ArgDef> output_def;
-//  std::vector<OpDef::ArgDef> grad_input_def;
-//  std::vector<OpDef::ArgDef> grad_output_def;
 };
 
 // same with commit b691c0 (possibly)
@@ -156,7 +152,7 @@ struct CallInfo {
 
     NodeDef* f_call = nullptr;
     NodeDef* g_call = nullptr;
-    
+
     std::vector<string> input_nodes;
     std::vector<string> g_input_nodes;
     std::unordered_map<string, AttrValue> f_attr;
@@ -564,7 +560,6 @@ struct Endpoint {
 
   DataType dtype() const { return node->output_type(index); }
 };
-
 
 static Node* AddArg(Graph* g, DataType dtype, int index) {
   DCHECK_LT(0, dtype);
