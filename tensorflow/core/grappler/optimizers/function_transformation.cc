@@ -539,6 +539,36 @@ Status InlineFunction(const FunctionDef& func_def,
 }
 
 
+// TODO(josh11b): Merge this with SummarizeNodeDef().
+string Print(const NodeDef& n) {
+  string out;
+  strings::StrAppend(&out, n.name(), " = ", n.op());
+  if (n.attr_size() > 0) {
+    std::vector<string> entries;
+    for (auto& a : n.attr()) {
+      entries.push_back(strings::StrCat(a.first, "=", Print(a.second)));
+    }
+    std::sort(entries.begin(), entries.end());
+    strings::StrAppend(&out, "[", str_util::Join(entries, ", "), "]");
+  }
+  strings::StrAppend(&out, "(");
+  std::vector<StringPiece> dat;
+  std::vector<string> dep;
+  for (StringPiece s : n.input()) {
+    if (s.Consume("^")) {
+      dep.push_back(s.ToString());
+    } else {
+      dat.push_back(s);
+    }
+  }
+  strings::StrAppend(&out, str_util::Join(dat, ", "), ")");
+  if (!dep.empty()) {
+    strings::StrAppend(&out, " @ ", str_util::Join(dep, ", "));
+  }
+  return out;
+}
+
+
 string Print(const FunctionDef& fdef) {
   string out;
   const OpDef& sig = fdef.signature();
