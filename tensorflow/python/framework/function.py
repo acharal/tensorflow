@@ -421,7 +421,12 @@ class _DefinedFunction(object):
       with vs.variable_scope("", custom_getter=temp_graph.getvar):
         if self._is_gradient:
           outputs = [self._func(*inputs)]
-          outputs.append(gradients_impl.gradients(outputs, inputs))
+          dinputs = []
+          for out in outputs:
+            argholder = array_ops.placeholder(out.op.node_def.attr["T"], name="d"+out.op.node_def.name)
+            dinputs.append(argholder)
+
+          outputs.append(gradients_impl.gradients(outputs, inputs, dinputs))
         else:
           outputs = self._func(*inputs)
 
