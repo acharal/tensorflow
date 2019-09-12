@@ -422,11 +422,14 @@ class _DefinedFunction(object):
         if self._is_gradient:
           outputs = [self._func(*inputs)]
           dinputs = []
-          for out in outputs:
-            argholder = array_ops.placeholder(out.op.node_def.attr["T"], name="d"+out.op.node_def.name)
+          for (out, name) in list(zip(outputs, self._out_names)):
+            argholder = array_ops.placeholder(out.op.node_def.attr["T"].type, name="d"+name)
             dinputs.append(argholder)
-
-          outputs.append(gradients_impl.gradients(outputs, inputs, dinputs))
+          doutputs = gradients_impl.gradients(outputs, inputs, dinputs)
+          if not isinstance(doutputs, list):
+            doutputs = [doutputs]
+          outputs.extend(doutputs)
+          inputs.extend(dinputs)
         else:
           outputs = self._func(*inputs)
 
