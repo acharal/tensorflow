@@ -538,6 +538,51 @@ Status InlineFunction(const FunctionDef& func_def,
     return Status::OK();
 }
 
+// Various helpers Print(proto) to print relevant protos to ascii.
+string Print(const OpDef::ArgDef& arg) {
+  string out;
+  strings::StrAppend(&out, arg.name(), ":");
+  if (arg.is_ref()) strings::StrAppend(&out, "Ref(");
+  if (!arg.number_attr().empty()) {
+    strings::StrAppend(&out, arg.number_attr(), "*");
+  }
+  if (arg.type() != DT_INVALID) {
+    strings::StrAppend(&out, DataTypeString(arg.type()));
+  } else {
+    strings::StrAppend(&out, arg.type_attr());
+  }
+  if (arg.is_ref()) strings::StrAppend(&out, ")");
+  return out;
+}
+
+// TODO(josh11b): Merge this with SummarizeAttrValue().
+string Print(const AttrValue& attr_value) {
+  if (attr_value.value_case() == AttrValue::kType) {
+    return DataTypeString(attr_value.type());
+  } else if ((attr_value.value_case() == AttrValue::kList) &&
+             (attr_value.list().type_size() > 0)) {
+    string ret = "{";
+    for (int i = 0; i < attr_value.list().type_size(); ++i) {
+      if (i > 0) strings::StrAppend(&ret, ", ");
+      strings::StrAppend(&ret, DataTypeString(attr_value.list().type(i)));
+    }
+    strings::StrAppend(&ret, "}");
+    return ret;
+  } else if (attr_value.value_case() == AttrValue::kFunc) {
+    if (attr_value.func().attr_size() == 0) {
+      return attr_value.func().name();
+    }
+    std::vector<string> entries;
+    for (auto p : attr_value.func().attr()) {
+      entries.push_back(strings::StrCat(p.first, "=", Print(p.second)));
+    }
+    std::sort(entries.begin(), entries.end());
+    return strings::StrCat(attr_value.func().name(), "[",
+                           str_util::Join(entries, ", "), "]");
+  }
+  return SummarizeAttrValue(attr_value);
+}
+
 
 // TODO(josh11b): Merge this with SummarizeNodeDef().
 string Print(const NodeDef& n) {
@@ -602,6 +647,60 @@ string Print(const FunctionDef& fdef) {
   }
   for (const auto& r : fdef.ret()) {
     strings::StrAppend(&out, "  return ", r.first, " = ", r.second, "\n");
+  }
+  strings::StrAppend(&out, "}\n");
+  return out;
+}
+
+
+string Print(gtl::ArraySlice<const NodeDef*> nodes) {
+  std::vector<const NodeDef*> arg;
+  std::vector<const NodeDef*> ret;
+  std::vector<const NodeDef*> body;
+  for (const NodeDef* n : nodes) {
+    if (n->op() == "_Arg") {
+      arg.push_back(n);
+    } else if (n->op() == "_Retval") {
+      ret.push_back(n);
+    } else {
+      body.push_back(n);
+    }
+  }
+  auto comp = [](const NodeDef* x, const NodeDef* y) {
+    int xi;
+    TF_CHECK_OK(GetNodeAttr(*x, "index", &xi));
+    int yi;
+    TF_CHECK_OK(GetNodeAttr(*y, "index", &yi));
+    return xi < yi;
+  };
+  std::sort(arg.begin(), arg.end(), comp);
+  std::sort(ret.begin(), ret.end(), comp);
+  string out;
+  strings::StrAppend(&out, "\n(");
+  auto get_type = [](const NodeDef& n) {
+    DataType dt;
+    if (!GetNodeAttr(n, "T", &dt).ok()) {
+      dt = DT_INVALID;
+    }
+    return DataTypeString(dt);
+  };
+  for (size_t i = 0; i < arg.size(); ++i) {
+    const NodeDef* n = arg[i];
+    if (i > 0) strings::StrAppend(&out, ", ");
+    CHECK_GE(n->attr_size(), 2);
+    strings::StrAppend(&out, n->name(), ":", get_type(*n));
+  }
+  strings::StrAppend(&out, ") -> (");
+  for (size_t i = 0; i < ret.size(); ++i) {
+    const NodeDef* n = ret[i];
+    if (i > 0) strings::StrAppend(&out, ", ");
+    CHECK_LE(2, n->attr_size());
+    CHECK_EQ(1, n->input_size());
+    strings::StrAppend(&out, n->input(0), ":", get_type(*n));
+  }
+  strings::StrAppend(&out, ") {\n");
+  for (size_t i = 0; i < body.size(); ++i) {
+    strings::StrAppend(&out, "  ", Print(*body[i]), "\n");
   }
   strings::StrAppend(&out, "}\n");
   return out;
