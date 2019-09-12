@@ -18,16 +18,12 @@ limitations under the License.
 #include "tensorflow/core/util/event.pb.h"
 #include "tensorflow/core/util/events_writer.h"
 
-#include "tensorflow/core/common_runtime/function.h"
-#include "tensorflow/core/framework/node_def_util.h"
-
-
 #include "tensorflow/core/graph/tensor_id.h"
-#include "tensorflow/core/graph/gradients.h"
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/function.pb.h"
 #include "tensorflow/core/framework/graph_def_util.h"
 #include "tensorflow/core/framework/node_def.pb.h"
+#include "tensorflow/core/framework/node_def_util.h"
 #include "tensorflow/core/framework/op_def.pb.h"
 #include "tensorflow/core/framework/versions.pb.h"
 #include "tensorflow/core/graph/graph_constructor.h"
@@ -94,12 +90,6 @@ class FunctionInliningContext {
       std::unordered_map<string, const FunctionDef*> functions;
       for (const FunctionDef& func : item.graph.library().function()) {
 
-          printf("Func Name: %s\n", func.signature().name().c_str());
-          for (const NodeDef& node : func.node_def()) {
-//              printf("%s\n", node.name().c_str());
-              printf("  %s:\n", SummarizeNodeDef(node).c_str());
-
-          }
         // Don't inline functions marked as noinline
         // if (func.attr().count("_noinline") != 0) {
         //   continue;
@@ -721,7 +711,8 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
                 "or not marked to be inlined");
     }
 
-    Print(*grad_def);
+    string s = Print(*grad_def);
+    printf("%s\n", s);
 
     /************* Print the Gradient graph of func def ******************/
     std::unique_ptr<GrapplerItem> temp_item = GrapplerItemFromFunctionDef(*grad_def, func_attr, ctx.Library());
