@@ -85,6 +85,11 @@ class FunctionInliningContext {
       }
     }
 
+    const FunctionDef* FindInlinedFunctionAndGradient(const string& name) const {
+      string grad_name = strings::StrCat(name, "Grad");
+      return FindInlinedFunction(grad_name);
+    }
+
   private:
     std::unordered_map<string, const FunctionDef*> InliningCandidates(const GrapplerItem& item) const {
       std::unordered_map<string, const FunctionDef*> functions;
@@ -573,7 +578,6 @@ string Print(const AttrValue& attr_value) {
   return SummarizeAttrValue(attr_value);
 }
 
-
 // TODO(josh11b): Merge this with SummarizeNodeDef().
 string Print(const NodeDef& n) {
   string out;
@@ -602,7 +606,6 @@ string Print(const NodeDef& n) {
   }
   return out;
 }
-
 
 string Print(const FunctionDef& fdef) {
   string out;
@@ -641,7 +644,6 @@ string Print(const FunctionDef& fdef) {
   strings::StrAppend(&out, "}\n");
   return out;
 }
-
 
 string Print(gtl::ArraySlice<const NodeDef*> nodes) {
   std::vector<const NodeDef*> arg;
@@ -703,11 +705,10 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
                       GraphDef* graph, FuncInfo& func_info) {
 
     // Get func_def's gradient graph
-    string grad_name = strings::StrCat(func_def.signature().name(), "Grad");
-    const FunctionDef* grad_def = ctx.FindInlinedFunction(grad_name);
+    const FunctionDef* grad_def = ctx.FindInlinedFunctionAndGradient(func_def.signature().name());
     if (grad_def == nullptr) {
         return errors::InvalidArgument(
-                "Invalid argument, function ", grad_name, "can not be found",
+                "Invalid argument, function ", grad_def.signature().name(), "can not be found",
                 "or not marked to be inlined");
     }
 
