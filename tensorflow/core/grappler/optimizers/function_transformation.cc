@@ -154,6 +154,7 @@ struct CallInfo {
     std::unordered_map<string, AttrValue> g_attr;
 
     string name() const { return f_call->name(); }
+    string g_name() const { return g_call->name(); }
     string f_name() const { return f_call->op(); }
     string device() const { return f_call->device(); }
     bool hasGradient() { return (g_call != nullptr); }
@@ -369,9 +370,12 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
 
     // inlines the body of a function and provides a struct with func_info
     TF_RETURN_IF_ERROR(FindCompatibleOrInlineFunction(
-        call_info.f_name(), call_info.f_attr, call_info.device(), graph, func_info));
+        call_info.f_name(), call_info.f_attr, call_info.device(), graph, call_info.hasGradient(), func_info));
 
     CHECK_EQ(call_info.input_nodes.size(), func_info.inputs.size());
+    if (call_info.hasGradient()) {
+      CHECK_EQ(call_info.g_input_nodes.size(), func_info.dinputs.size());
+    }
 
     std::vector<NodeDef*> call_nodes;
     std::vector<NodeDef*> ret_nodes;
@@ -409,6 +413,7 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
         *(ret->add_input()) = AsControlDependency(call->name());
     }
 
+
     if (ShouldPreserveOutputs(call_info.name())) {
         // create an IdentityN with the same name of the initial function call
         // so as to preserve the naming of the outputs.
@@ -435,6 +440,70 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
             ReplaceOutput(call_info.name(), ret_nodes[0]->name());
         }
     }
+
+    std::vector<NodeDef*> g_call_nodes;
+    std::vector<NodeDef*> g_ret_nodes;
+
+    g_call_nodes.resize(func_info.dinputs.size());
+    for (unsigned int arg_num = 0; arg_num < func_info.dinputs.size(); arg_num++) {
+        g_call_nodes[arg_num] = graph->add_node();
+        AddCallOp(call_info,
+                func_info.output_types[arg_num],
+                call_info.g_input_nodes[arg_num],
+                arg_num,
+                call_nodes[arg_num]);
+
+        g_call_nodes[arg_num]->set_device(call_info.device());
+
+        // connect the input of the inlined function to feed from call.
+        TF_RETURN_IF_ERROR(ConnectInput(g_call_nodes[arg_num], func_info.dinputs[arg_num]));
+    }
+
+    g_ret_nodes.resize(func_info.doutputs.size());
+    for (unsigned int out_port = 0; out_port < func_info.doutputs.size(); out_port++) {
+        g_ret_nodes[out_port] = graph->add_node();
+        AddRetOp(call_info,
+               func_info.input_types[out_port],
+               func_info.doutputs[out_port],
+               out_port,
+               g_ret_nodes[out_port]);
+        g_ret_nodes[out_port]->set_device(call_info.device());
+    }
+
+    // for each call create a control dependency to each return
+    // to facilitate dead propagation semantics
+    for (NodeDef* ret : g_ret_nodes) {
+        for (NodeDef* call : g_call_nodes)
+        *(ret->add_input()) = AsControlDependency(call->name());
+    }
+
+    if (ShouldPreserveOutputs(call_info.g_name())) {
+        // create an IdentityN with the same name of the initial function call
+        // so as to preserve the naming of the outputs.
+        // we re-use the initial node and we change (a) the op to IdentityN and
+        // (b) the inputs to point to the outputs of the ret_nodes
+        // The other information such as types, device placement etc remain the same.
+        // The IdentityN node will sync the outputs and therefore may result to performance degradation.
+        NodeDef* out = graph->add_node();
+        out->set_op(kIdentityNOp);
+        out->set_name(call_info.g_name());
+        out->set_device(call_info.device());
+        AttrValue::ListValue* type_list = (*out->mutable_attr())["T"].mutable_list();
+        for (const DataType& type : func_info.input_types) {
+          type_list->add_type(type);
+        }
+        for (unsigned int i = 0; i < func_info.doutputs.size(); i++) {
+            *out->add_input() = g_ret_nodes[i]->name();
+        }
+    } else {
+        for (unsigned int out_port = 0; out_port < func_info.doutputs.size(); out_port++) {
+            ReplaceOutput(strings::StrCat(call_info.g_name(), ":", out_port), g_ret_nodes[out_port]->name());
+        }
+        if (func_info.doutputs.size() == 1) {
+            ReplaceOutput(call_info.g_name(), g_ret_nodes[0]->name());
+        }
+    }
+
     printf("Mark call %s (function %s) as transformed\n", call_info.name().c_str(), call_info.f_name().c_str());
     MarkCallTransformed(call_info);
 
@@ -836,6 +905,7 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
             const std::unordered_map<string, AttrValue>& func_attr,
             const string& device,
             GraphDef* graph,
+            bool include_gradient,
             FuncInfo& func_info) {
     const auto& it = transformed_functions_.find(func_name);
     // maybe it is not wise to discard call attributes
@@ -850,8 +920,13 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
                         "Invalid argument, function ", func_name, "can not be found",
                         "or not marked to be inlined");
     }
-    TF_RETURN_IF_ERROR(
-            InlineFunctionAndGradient(*func_def, ctx, func_attr, device, graph, func_info));
+    if (include_gradient) {
+      TF_RETURN_IF_ERROR(
+              InlineFunctionAndGradient(*func_def, ctx, func_attr, device, graph, func_info));
+    } else { 
+      TF_RETURN_IF_ERROR(
+              InlineFunction(*func_def, ctx, func_attr, device, graph, func_info));
+    }
     transformed_functions_[func_name] = func_info;
     printf("Store inlined function %s\n", func_name.c_str());
     return Status::OK();
