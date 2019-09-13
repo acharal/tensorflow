@@ -706,7 +706,7 @@ Status InlineFunctionAndGradient(const FunctionDef& f_def,
 
     // Get func_def's gradient graph
     const FunctionDef* fg_def = ctx.FindInlinedFunctionAndGradient(f_def.signature().name());
-    if (grad_def == nullptr) {
+    if (fg_def == nullptr) {
         return errors::InvalidArgument(
                 "Invalid argument, function ", fg_def->signature().name(), "can not be found",
                 "or not marked to be inlined");
@@ -720,18 +720,18 @@ Status InlineFunctionAndGradient(const FunctionDef& f_def,
         return errors::InvalidArgument(
                  "Failed to inline function (and its gradient)", func_def.signature().name());
     }
-    int f_arg_size = f_def.signature().input_arg_size();
-    int f_ret_size = f_def.signature().output_arg_size();
-    int g_arg_size = fg_def.signature().input_arg_size() - f_arg_size;
-    int g_ret_size = fg_def.signature().output_arg_size() - f_ret_size;
+    unsigned int f_arg_size = f_def.signature().input_arg_size();
+    unsigned int f_ret_size = f_def.signature().output_arg_size();
+    unsigned int g_arg_size = fg_def->signature().input_arg_size() - f_arg_size;
+    unsigned int g_ret_size = fg_def->signature().output_arg_size() - f_ret_size;
 
     CHECKEQ(f_arg_size, g_ret_size);
     CHECKEQ(g_arg_size, f_ret_size);
 
     func_info.input_types.resize(f_arg_size);
     for (int i = 0; i < f_arg_size; i++) {
-      const OpDef::ArgDef& arg = fg_def.signature().input_arg(i);
-      const OpDef::ArgDef& darg = fg_def.signature().output_arg(f_ret_size + i);
+      const OpDef::ArgDef& arg = fg_def->signature().input_arg(i);
+      const OpDef::ArgDef& darg = fg_def->signature().output_arg(f_ret_size + i);
       DataType type;
       TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
       DataType dtype;
@@ -742,8 +742,8 @@ Status InlineFunctionAndGradient(const FunctionDef& f_def,
 
     func_info.output_types.resize(f_ret_size);
     for (int i = 0; i < f_ret_size; i++) {
-      const OpDef::ArgDef& arg  = fg_def.signature().output_arg(i);
-      const OpDef::ArgDef& darg = fg_def.signature().input_arg(f_arg_size + i);
+      const OpDef::ArgDef& arg  = fg_def->signature().output_arg(i);
+      const OpDef::ArgDef& darg = fg_def->signature().input_arg(f_arg_size + i);
       DataType type;
       TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
       DataType dtype;
