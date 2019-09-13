@@ -754,7 +754,6 @@ Status InlineFunctionAndGradient(const FunctionDef& f_def,
 
     // create an inverse map of arg to provide name -> argument number
     std::unordered_map<string, int> input_map;
-    std::unordered_map<string, int> dinput_map;
     for (int i = 0; i < f_arg_size; ++i) {
         const OpDef::ArgDef& arg = fg_def.signature().input_arg(i);
         input_map[arg.name()] = i;
@@ -781,9 +780,9 @@ Status InlineFunctionAndGradient(const FunctionDef& f_def,
           func_body_node.set_device(device);
 
         // If the func body node is func's input argument
-        auto input_it = input_nodes.find(curr_name);
+        auto input_it = input_map.find(curr_name);
 
-        if (input_it != input_nodes.end()) {
+        if (input_it != input_map.end()) {
             CHECK_EQ(0, func_body_node.input_size());
             // Turn input placeholders into identity nodes
             if (IsPlaceholder(func_body_node)) {
