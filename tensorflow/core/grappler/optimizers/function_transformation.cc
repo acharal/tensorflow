@@ -698,41 +698,133 @@ string Print(gtl::ArraySlice<const NodeDef*> nodes) {
   return out;
 }
 
-Status InlineFunctionAndGradient(const FunctionDef& func_def,
+Status InlineFunctionAndGradient(const FunctionDef& f_def,
                       const FunctionInliningContext& ctx,
                       const std::unordered_map<string, AttrValue>& func_attr,
                       const string& device,
                       GraphDef* graph, FuncInfo& func_info) {
 
     // Get func_def's gradient graph
-    const FunctionDef* grad_def = ctx.FindInlinedFunctionAndGradient(func_def.signature().name());
+    const FunctionDef* fg_def = ctx.FindInlinedFunctionAndGradient(f_def.signature().name());
     if (grad_def == nullptr) {
         return errors::InvalidArgument(
-                "Invalid argument, function ", grad_def->signature().name(), "can not be found",
+                "Invalid argument, function ", fg_def->signature().name(), "can not be found",
                 "or not marked to be inlined");
     }
 
-    string s = Print(*grad_def);
-    printf("%s\n", s.c_str());
+    std::unique_ptr<GrapplerItem> item = GrapplerItemFromFunctionDef(*fg_def, func_attr, ctx.Library());
+    
+    string prefix = f_def.signature().name();
 
-    /************* Print the Gradient graph of func def ******************/
-    std::unique_ptr<GrapplerItem> temp_item = GrapplerItemFromFunctionDef(*grad_def, func_attr, ctx.Library());
-    EventsWriter writer("Gradient_");
-    Event event;
-    event.set_wall_time(1234);
-    event.set_step(34);
-    const size_t proto_size = temp_item->graph.ByteSizeLong();
-    void* buf = port::Malloc(proto_size);
-    if (buf == nullptr) {
-        return errors::ResourceExhausted(
-                "Failed to allocate memory to serialize message of type '" ,
-                temp_item->graph.GetTypeName(), "' and size ", proto_size);
+    if (!item) {
+        return errors::InvalidArgument(
+                 "Failed to inline function (and its gradient)", func_def.signature().name());
     }
-        temp_item->graph.SerializeToArray(buf, proto_size);
-    const void* bf = buf;
-    event.set_graph_def(bf, proto_size);
-    writer.WriteEvent(event);
-    /********************************************************************/
+    int f_arg_size = f_def.signature().input_arg_size();
+    int f_ret_size = f_def.signature().output_arg_size();
+    int g_arg_size = fg_def.signature().input_arg_size() - f_arg_size;
+    int g_ret_size = fg_def.signature().output_arg_size() - f_ret_size;
+
+    CHECKEQ(f_arg_size, g_ret_size);
+    CHECKEQ(g_arg_size, f_ret_size);
+
+    func_info.input_types.resize(f_arg_size);
+    for (int i = 0; i < f_arg_size; i++) {
+      const OpDef::ArgDef& arg = fg_def.signature().input_arg(i);
+      const OpDef::ArgDef& darg = fg_def.signature().output_arg(f_ret_size + i);
+      DataType type;
+      TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
+      DataType dtype;
+      TF_RETURN_IF_ERROR(CopyArgType(darg, func_attr, &dtype));
+      CHECKEQ(type, dtype);
+      func_info.input_types.push_back(type);
+    }
+
+    func_info.output_types.resize(f_ret_size);
+    for (int i = 0; i < f_ret_size; i++) {
+      const OpDef::ArgDef& arg  = fg_def.signature().output_arg(i);
+      const OpDef::ArgDef& darg = fg_def.signature().input_arg(f_arg_size + i);
+      DataType type;
+      TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
+      DataType dtype;
+      TF_RETURN_IF_ERROR(CopyArgType(darg, func_attr, &dtype));
+      CHECKEQ(type, dtype);
+      func_info.output_types.push_back(type);
+    }
+
+    // create an inverse map of arg to provide name -> argument number
+    std::unordered_map<string, int> input_map;
+    std::unordered_map<string, int> dinput_map;
+    for (int i = 0; i < f_arg_size; ++i) {
+        const OpDef::ArgDef& arg = fg_def.signature().input_arg(i);
+        input_map[arg.name()] = i;
+    }
+    for (int i = f_arg_size; i < g_arg_size; ++i) {
+        const OpDef::ArgDef& arg = fg_def.signature().input_arg(i);
+        input_map[arg.name()] = i;
+    }
+    func_info.inputs.resize(f_arg_size);
+    func_info.outputs.resize(f_ret_size);
+    func_info.dinputs.resize(g_arg_size);
+    func_info.doutputs.resize(g_ret_size);
+
+    // prefix each node in function graph and place it to the global graph.
+    // the inputs of each node need to be renamed as well to reflect the change.
+    for (NodeDef& func_body_node : *item->graph.mutable_node()) {
+        const string& curr_name = func_body_node.name();
+
+        // Add the node name as a prefix to avoid collisions after inlining
+        func_body_node.set_name(AddPrefixToNodeName(curr_name, prefix));
+
+        // Make sure the node is placed
+        if (func_body_node.device().empty())
+          func_body_node.set_device(device);
+
+        // If the func body node is func's input argument
+        auto input_it = input_nodes.find(curr_name);
+
+        if (input_it != input_nodes.end()) {
+            CHECK_EQ(0, func_body_node.input_size());
+            // Turn input placeholders into identity nodes
+            if (IsPlaceholder(func_body_node)) {
+                func_body_node.set_op(kIdentityOp);
+            }
+            int i = input_it->second;
+            if (i < f_arg_size) {
+              func_info.inputs[i] = &func_body_node;
+            } else { 
+              i = i - f_arg_size;
+              func_info.dinputs[i] = &func_body_node;
+            }
+        } else {
+            // Else if not an input_arg_node
+            // Update the input names if any.
+            for (string& input : *func_body_node.mutable_input()) {
+                input = AddPrefixToNodeName(input, prefix);
+            }
+            // If the node has no input, make hook it up to the Merge nodes to ensure
+            // it runs in the same frame as the other nodes of the function body.
+            if (func_body_node.input_size() == 0) {
+                for (auto& func_input_node : func_info.inputs) {
+                 *func_body_node.add_input() = AsControlDependency(func_input_node->name());
+                }
+            }
+        }
+        // Move the node to the main graph
+        graph->add_node()->Swap(&func_body_node);
+    }
+
+    CHECKEQ(f_ret_size + g_ret_size, item->fetch.size());
+
+    for (unsigned int i = 0; i < f_ret_size + g_ret_size; i++) {
+        string output_port = AddPrefixToNodeName(item->fetch[i], prefix);
+        if (i < f_ret_size) {
+          func_info.outputs[i] = output_port;
+        } else { 
+          i = i - f_ret_size;
+          func_info.doutputs[i] = output_port;
+        }
+    }
 
     return Status::OK();
 }
