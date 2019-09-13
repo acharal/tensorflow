@@ -708,7 +708,7 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
     const FunctionDef* grad_def = ctx.FindInlinedFunctionAndGradient(func_def.signature().name());
     if (grad_def == nullptr) {
         return errors::InvalidArgument(
-                "Invalid argument, function ", grad_def.signature().name(), "can not be found",
+                "Invalid argument, function ", grad_def->signature().name(), "can not be found",
                 "or not marked to be inlined");
     }
 
