@@ -178,7 +178,9 @@ class CallRewriter {
     Status FindCompatibleOrInlineFunction(const string& name,
         const std::unordered_map<string, AttrValue>& func_attr,
         const string& device,
-        GraphDef* optimized_graph, FuncInfo& func_info);
+        GraphDef* optimized_graph, 
+        bool include_gradient,
+        FuncInfo& func_info);
 
     void Flush() {
         if (!nodes_to_delete.empty()) {
