@@ -246,6 +246,10 @@ class CallRewriter {
         node->set_op("NoOp");
         node->set_name(AddPrefixToNodeName(node->name(), "$MarkToDelete$"));
         nodes_to_delete.insert(node->name());
+        node = call_info.g_call;
+        node->clear_input();
+        node->set_op("NoOp");
+        node->set_name(AddPrefixToNodeName(node->name(), "$MarkToDelete$"));
     }
 
     GraphDef* graph;
