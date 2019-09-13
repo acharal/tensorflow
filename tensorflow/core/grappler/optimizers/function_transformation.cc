@@ -713,7 +713,7 @@ Status InlineFunctionAndGradient(const FunctionDef& func_def,
     }
 
     string s = Print(*grad_def);
-    printf("%s\n", s);
+    printf("%s\n", s.c_str());
 
     /************* Print the Gradient graph of func def ******************/
     std::unique_ptr<GrapplerItem> temp_item = GrapplerItemFromFunctionDef(*grad_def, func_attr, ctx.Library());
