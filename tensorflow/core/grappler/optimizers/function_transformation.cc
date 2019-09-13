@@ -718,7 +718,7 @@ Status InlineFunctionAndGradient(const FunctionDef& f_def,
 
     if (!item) {
         return errors::InvalidArgument(
-                 "Failed to inline function (and its gradient)", func_def.signature().name());
+                 "Failed to inline function (and its gradient)", f_def.signature().name());
     }
     unsigned int f_arg_size = f_def.signature().input_arg_size();
     unsigned int f_ret_size = f_def.signature().output_arg_size();
@@ -754,14 +754,16 @@ Status InlineFunctionAndGradient(const FunctionDef& f_def,
 
     // create an inverse map of arg to provide name -> argument number
     std::unordered_map<string, int> input_map;
-    for (int i = 0; i < f_arg_size; ++i) {
-        const OpDef::ArgDef& arg = fg_def.signature().input_arg(i);
+    for (int i = 0; i < f_arg_size + g_arg_size; ++i) {
+        const OpDef::ArgDef& arg = fg_def->signature().input_arg(i);
         input_map[arg.name()] = i;
     }
+    /*
     for (int i = f_arg_size; i < g_arg_size; ++i) {
-        const OpDef::ArgDef& arg = fg_def.signature().input_arg(i);
+        const OpDef::ArgDef& arg = fg_def->signature().input_arg(i);
         input_map[arg.name()] = i;
     }
+    */
     func_info.inputs.resize(f_arg_size);
     func_info.outputs.resize(f_ret_size);
     func_info.dinputs.resize(g_arg_size);
