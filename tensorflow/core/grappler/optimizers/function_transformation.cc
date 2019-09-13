@@ -725,8 +725,8 @@ Status InlineFunctionAndGradient(const FunctionDef& f_def,
     unsigned int g_arg_size = fg_def->signature().input_arg_size() - f_arg_size;
     unsigned int g_ret_size = fg_def->signature().output_arg_size() - f_ret_size;
 
-    CHECKEQ(f_arg_size, g_ret_size);
-    CHECKEQ(g_arg_size, f_ret_size);
+    CHECK_EQ(f_arg_size, g_ret_size);
+    CHECK_EQ(g_arg_size, f_ret_size);
 
     func_info.input_types.resize(f_arg_size);
     for (int i = 0; i < f_arg_size; i++) {
@@ -736,7 +736,7 @@ Status InlineFunctionAndGradient(const FunctionDef& f_def,
       TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
       DataType dtype;
       TF_RETURN_IF_ERROR(CopyArgType(darg, func_attr, &dtype));
-      CHECKEQ(type, dtype);
+      CHECK_EQ(type, dtype);
       func_info.input_types.push_back(type);
     }
 
@@ -748,7 +748,7 @@ Status InlineFunctionAndGradient(const FunctionDef& f_def,
       TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
       DataType dtype;
       TF_RETURN_IF_ERROR(CopyArgType(darg, func_attr, &dtype));
-      CHECKEQ(type, dtype);
+      CHECK_EQ(type, dtype);
       func_info.output_types.push_back(type);
     }
 
@@ -814,7 +814,7 @@ Status InlineFunctionAndGradient(const FunctionDef& f_def,
         graph->add_node()->Swap(&func_body_node);
     }
 
-    CHECKEQ(f_ret_size + g_ret_size, item->fetch.size());
+    CHECK_EQ(f_ret_size + g_ret_size, item->fetch.size());
 
     for (unsigned int i = 0; i < f_ret_size + g_ret_size; i++) {
         string output_port = AddPrefixToNodeName(item->fetch[i], prefix);
