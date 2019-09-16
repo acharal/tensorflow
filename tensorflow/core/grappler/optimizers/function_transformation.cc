@@ -63,18 +63,9 @@ class FunctionInliningContext {
   public:
     explicit FunctionInliningContext(const GrapplerItem& item)
             : library_(&item.graph.library()), functions_(InliningCandidates(item)) {
-
-      // Todo: Deallocate this afterwards
-      lib_def_ = new FunctionLibraryDefinition(OpRegistry::Global(), item.graph.library());
-
-      get_func_sig_ = [this](const string& op, const OpDef** sig) {
-          return lib_def_->LookUpOpDef(op, sig);
-      };
     }
 
     const FunctionDefLibrary& Library() const { return *library_; }
-    const FunctionLibraryDefinition* Libdef() const { return lib_def_; }
-    const std::function<Status(const string&, const OpDef**)> GetFuncSig() const {return get_func_sig_;}
 
     bool HasInlinedFunctions() const { return !functions_.empty(); }
 
@@ -120,9 +111,7 @@ class FunctionInliningContext {
     }
 
     const FunctionDefLibrary* library_;
-    const FunctionLibraryDefinition* lib_def_;
     std::unordered_map<string, const FunctionDef*> functions_;
-    std::function<Status(const string&, const OpDef**)> get_func_sig_;
 
     TF_DISALLOW_COPY_AND_ASSIGN(FunctionInliningContext);
 };
@@ -764,7 +753,7 @@ Status InlineFunctionAndGradient(const FunctionDef* fdef,
     func_info.g.arg_types.resize(farg_size + garg_size);
     func_info.g.ret_types.resize(farg_size);
     for (int i = 0; i < farg_size; i++) {
-      const OpDef::ArgDef& arg  = fgdef->signature().input_arg(i);
+      const OpDef::ArgDef& arg = fgdef->signature().input_arg(i);
       const OpDef::ArgDef& darg = fgdef->signature().output_arg(fret_size + i);
       DataType type;
       TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
