@@ -43,8 +43,54 @@ static constexpr const char* const kIdentityNOp = "IdentityN";
 static constexpr const char* const kMergeOp = "Merge";
 static constexpr const char* const kGradientOp =
     FunctionLibraryDefinition::kGradientOp;
-static constexpr const char* const kFuncAttr =
+static constexpr const char* const kFuncAttrName =
     FunctionLibraryDefinition::kFuncAttr;
+static constexpr const char* kNoInlineAttr = "_noinline";
+
+bool AttrIsTrue(const FunctionDef& func, const string& attr) {
+  return func.attr().count(attr) != 0 && func.attr().at(attr).b();
+}
+
+bool MarkedNoInline(const FunctionDef& func) {
+  return AttrIsTrue(func, kNoInlineAttr);
+}
+
+// There are two ways of calling a Tensorflow function:
+//
+// 1. Direct function call: node.op() is the name of the function.
+//
+// 2. Indirect function call: the function name is passed through a node
+//    attribute, and special Tensorflow kernels are responsible for calling the
+//    function through the FunctionLibraryRuntime. Example: PartitionedCallOp.
+
+// Check if func_node.op() matches the name in FunctionDef signature.
+bool IsDirectFunctionCall(const FunctionDef& func, const NodeDef& func_node) {
+  return func_node.op() == func.signature().name();
+}
+
+// Check if func_node has function attribute with a function name matching
+// FunctionDef signature.
+bool IsIndirectFunctionCall(const FunctionDef& func, const NodeDef& func_node) {
+  auto* func_attr = AttrSlice(func_node).Find(kFuncAttrName);
+  return func_attr != nullptr && func_attr->has_func() &&
+         func_attr->func().name() == func.signature().name();
+}
+
+AttrSlice FunctionInstantiationAttributes(const FunctionDef& func,
+                                          const NodeDef& func_node) {
+  if (IsDirectFunctionCall(func, func_node)) {
+    return AttrSlice(func_node);
+
+  } else if (IsIndirectFunctionCall(func, func_node)) {
+    auto* func_attr = AttrSlice(func_node).Find(kFuncAttrName);
+    return AttrSlice(&func_attr->func().attr());
+
+  } else {
+    LOG(WARNING) << "Can't resolve function instantiation attributes: "
+                 << SummarizeNodeDef(func_node);
+    return AttrSlice();
+  }
+}
 
 struct FuncInfo { 
   DataTypeVector arg_types;
@@ -58,21 +104,30 @@ struct FuncGradInfo {
   FuncInfo g;
 };
 
-// same with commit b691c0 (possibly)
+// same with commit a9a3b98 (possibly)
 class FunctionInliningContext {
   public:
     explicit FunctionInliningContext(const GrapplerItem& item)
-            : library_(&item.graph.library()), functions_(InliningCandidates(item)) {
+            : function_library_(FunctionLibraryDefinition(OpRegistry::Global(),
+                                                    item.graph.library())) {
+      InitializeInlinedFunctions(item);
     }
 
-    const FunctionDefLibrary& Library() const { return *library_; }
 
-    bool HasInlinedFunctions() const { return !functions_.empty(); }
+    const FunctionLibraryDefinition& FunctionLibrary() const { 
+      return function_library_; 
+    }
+
+    bool HasInlinedFunctions() const { return !inlined_functions_.empty(); }
+
+    bool IsInlinedFunction(const string& name) const {
+      return inlined_functions_.count(name) > 0;
+    }
 
     // Find inlining candidate by name. Return nullptr if not found.
     const FunctionDef* FindInlinedFunction(const string& name) const {
-      auto it = functions_.find(name);
-      if (it != functions_.end()) {
+      auto it = inlined_functions_.find(name);
+      if (it != inlined_functions_.end()) {
         return it->second;
       } else {
         return nullptr;
@@ -85,14 +140,14 @@ class FunctionInliningContext {
     }
 
   private:
-    std::unordered_map<string, const FunctionDef*> InliningCandidates(const GrapplerItem& item) const {
-      std::unordered_map<string, const FunctionDef*> functions;
+    void InitializeInlinedFunctions(const GrapplerItem& item) {
       for (const FunctionDef& func : item.graph.library().function()) {
 
+        bool marked_noinline = MarkedNoInline(func);
         // Don't inline functions marked as noinline
-        // if (func.attr().count("_noinline") != 0) {
-        //   continue;
-        // }
+        if (marked_noinline) {
+           continue;
+        }
         // Don't touch anything marked XLA to prevent XLA failures further down
         // the road.
         if (func.attr().count("_XlaCompile") > 0 &&
@@ -105,65 +160,28 @@ class FunctionInliningContext {
             func.signature().output_arg_size() == 0) {
           continue;
         }
-        functions[func.signature().name()] = &func;
+        inlined_functions_[func.signature().name()] = &func;
       }
-      return functions;
     }
 
-    const FunctionDefLibrary* library_;
-    std::unordered_map<string, const FunctionDef*> functions_;
+    FunctionLibraryDefinition function_library_;
+    std::unordered_map<string, const FunctionDef*> inlined_functions_;	
 
     TF_DISALLOW_COPY_AND_ASSIGN(FunctionInliningContext);
 };
 
-
-// Copy input/output argument type to the type_list. Return error if argument
-// type is not explicitly defined, and not specified in function attributes.
-Status CopyArgType(const OpDef::ArgDef& arg,
-                   const std::unordered_map<string, AttrValue>& func_attr,
-                   DataType* type) {
-    if (arg.type() != DT_INVALID) {
-      *type = arg.type();
-    } else {
-      auto it = func_attr.find(arg.type_attr());
-      if (it == func_attr.end() || it->second.type() == DT_INVALID) {
-        return errors::InvalidArgument(
-                "Invalid argument ", arg.name());
-      }
-      *type = it->second.type();
-    }
-    return Status::OK();
-}
-
-// Copy input/output argument type to the type_list. Return error if argument
-// type is not explicitly defined, and not specified in function attributes.
-Status CopyArgType(const OpDef::ArgDef& arg,
-                   const std::unordered_map<string, AttrValue>& func_attr,
-                   AttrValue::ListValue* type_list) {
-    if (arg.type() != DT_INVALID) {
-      type_list->add_type(arg.type());
-    } else {
-      auto it = func_attr.find(arg.type_attr());
-      if (it == func_attr.end() || it->second.type() == DT_INVALID) {
-        return errors::InvalidArgument("Invalid argument ", arg.name());
-      }
-      type_list->add_type(it->second.type());
-    }
-    return Status::OK();
-}
-
 struct CallInfo {
-    int call_id;
-    string call_frame;
-    NodeDef* fcall = nullptr;
-    NodeDef* gcall = nullptr;
-    bool hasGradient() const { return (gcall != nullptr); }
+  int call_id;
+  string call_frame;
+  NodeDef* fcall = nullptr;
+  NodeDef* gcall = nullptr;
+  bool hasGradient() const { return (gcall != nullptr); }
 };
 
 class CallRewriter {
 
   public:
-    explicit CallRewriter(const GrapplerItem item_, GraphDef* graph_, const FunctionInliningContext& ctx_)
+    explicit CallRewriter(const GrapplerItem& item_, GraphDef* graph_, const FunctionInliningContext& ctx_)
         : graph(graph_), ctx(ctx_), item(item_) { }
 
     ~CallRewriter() {
@@ -172,13 +190,12 @@ class CallRewriter {
 
     Status CollectCalls(std::vector<CallInfo>& calls);
 
-    Status TransformCall(CallInfo& call_info);
+    Status TransformCall(const CallInfo& call_info);
 
     // Inlines a function to item.graph and if already inlined provide func_info
-    Status FindCompatibleOrInlineFunction(
-        const CallInfo& call,
-        GraphDef* optimized_graph,
-        FuncGradInfo& func_info);
+    Status FindCompatibleOrInlineFunction(const CallInfo& call,
+                                          GraphDef* optimized_graph,
+                                          FuncGradInfo& func_info);
 
     void Flush() {
         if (!nodes_to_delete.empty()) {
@@ -225,7 +242,7 @@ class CallRewriter {
 
     Status ConnectInput(NodeDef* from, NodeDef* to);
 
-    Status TransformNode(CallInfo& info, 
+    Status TransformNode(const CallInfo& info, 
             NodeDef* call, const FuncInfo& f, 
             std::vector<NodeDef*>& call_nodes,
             std::vector<NodeDef*>& ret_nodes);
@@ -243,9 +260,8 @@ class CallRewriter {
         output_map_[old_output] = new_output;
     }
 
-    void MarkCallTransformed(CallInfo& call_info) {
+    void MarkCallTransformed(const CallInfo& call_info) {
       CHECK_NOTNULL(call_info.fcall);
-
       MarkNodeDelete(call_info.fcall);
       
       if (call_info.gcall != nullptr) {
@@ -262,7 +278,7 @@ class CallRewriter {
 
     GraphDef* graph;
     const FunctionInliningContext& ctx;
-    const GrapplerItem item;
+    const GrapplerItem& item;
     std::unordered_map<string, FuncGradInfo> transformed_functions_;
     std::unordered_map<string, string> output_map_;
     std::set<string> nodes_to_delete;
@@ -365,8 +381,9 @@ Status CallRewriter::ConnectInput(NodeDef* from, NodeDef* to) {
     return Status::OK();
 }
 
-Status CallRewriter::TransformNode(CallInfo& info, 
-        NodeDef* call, const FuncInfo& f, 
+Status CallRewriter::TransformNode(const CallInfo& info, 
+        NodeDef* call, 
+        const FuncInfo& f, 
         std::vector<NodeDef*>& call_nodes,
         std::vector<NodeDef*>& ret_nodes) {
   CHECK_EQ(call->input_size(), f.args.size());
@@ -448,7 +465,7 @@ Status CallRewriter::TransformNode(CallInfo& info,
   return Status::OK();
 }
 
-Status CallRewriter::TransformCall(CallInfo& call_info) {
+Status CallRewriter::TransformCall(const CallInfo& call_info) {
     FuncGradInfo func_info;
 
     // inlines the body of a function and provides a struct with func_info
@@ -471,57 +488,60 @@ Status CallRewriter::TransformCall(CallInfo& call_info) {
 }
 
 Status InlineFunction(const FunctionDef& func_def,
-                      const std::unordered_map<string, AttrValue>& func_attr,
+                      const AttrSlice& func_instantiation_attr,
                       const FunctionInliningContext& ctx,
                       const string& device,
                       GraphDef* graph, FuncGradInfo& func_info) {
-    std::unique_ptr<GrapplerItem> item = GrapplerItemFromFunctionDef(func_def, func_attr, ctx.Library());
-    string prefix = func_def.signature().name();
+    GrapplerFunctionItem item;
+    const int graph_version = graph->versions().producer();
+    Status item_status = MakeGrapplerFunctionItem(func_def, func_instantiation_attr, ctx.FunctionLibrary(), graph_version, &item);
 
-    if (!item) {
+    if (!item_status.ok()) {
         return errors::InvalidArgument(
-                 "Failed to inline function ", func_def.signature().name());
+                 "Failed to inline function ", func_def.signature().name(),
+                 "Error: ", item_status.error_message());
     }
+
+    string prefix = func_def.signature().name();
     int arg_size = func_def.signature().input_arg_size();
     // create an inverse map of arg to provide name -> argument number
     std::unordered_map<string, int> input_nodes;
     for (int i = 0; i < arg_size; ++i) {
-        const OpDef::ArgDef& arg = func_def.signature().input_arg(i);
-        input_nodes[arg.name()] = i;
+        const InputArgExpansion& input_arg = item.input(i);
+        input_nodes[input_arg.input_name] = i;
     }
     func_info.f.args.resize(arg_size);
     func_info.f.arg_types.resize(arg_size);
     for (int i = 0; i < arg_size; ++i) {
-        const OpDef::ArgDef& arg = func_def.signature().input_arg(i);
+        const InputArgExpansion& input_arg = item.input(i);
         NodeDef* merge = graph->add_node();
         merge->set_name(AddPrefixToNodeName(strings::StrCat("Input", "_", i), prefix));
         merge->set_op(kIdentityOp);
         merge->set_device(device);
-
-        DataType type;
-        TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
+        
         auto& attr = *merge->mutable_attr();
-        attr["T"].set_type(type);
+        attr["T"].set_type(input_arg.data_type);
 
         func_info.f.args[i] = merge;
-        func_info.f.arg_types[i] = type;
+        func_info.f.arg_types[i] = input_arg.data_type;
     }
 
     // prefix each node in function graph and place it to the global graph.
     // the inputs of each node need to be renamed as well to reflect the change.
-    for (NodeDef& func_body_node : *item->graph.mutable_node()) {
+    for (NodeDef& func_body_node : *item.mutable_function_body().mutable_node()) {
         const string& curr_name = func_body_node.name();
-        // If the func body node is func's input argument
-        auto input_it = input_nodes.find(curr_name);
 
-        if (input_it != input_nodes.end()) {
+        if (item.IsInputPlaceholder(curr_name)) {
             CHECK_EQ(0, func_body_node.input_size());
+            // If the func body node is func's input argument
             // Turn input placeholders into identity nodes
-            if (IsPlaceholder(func_body_node)) {
-                func_body_node.set_op(kIdentityOp);
-            }
+            func_body_node.set_op(kIdentityOp);
+            (*func_body_node.mutable_attr())["T"] = func_body_node.attr().at("dtype");
+            func_body_node.mutable_attr()->erase("dtype");
+            func_body_node.mutable_attr()->erase("shape");
             // Connect merge with input arg
-            func_body_node.add_input(func_info.f.args[input_it->second]->name());
+            int idx = input_nodes[curr_name];
+            func_body_node.add_input(func_info.f.args[idx]->name());
         } else {
             // Else if not an input_arg_node
             // Update the input names if any.
@@ -549,208 +569,46 @@ Status InlineFunction(const FunctionDef& func_def,
     }
 
     func_info.f.rets.clear();
-    func_info.f.rets.resize(item->fetch.size());
-    func_info.f.ret_types.resize(item->fetch.size());
+    func_info.f.rets.resize(item.fetch.size());
+    func_info.f.ret_types.resize(item.fetch.size());
 
-    for (unsigned int i = 0; i < item->fetch.size(); i++) {
-        func_info.f.rets[i] = AddPrefixToNodeName(item->fetch[i], prefix);
-        DataType type;
-        TF_RETURN_IF_ERROR(CopyArgType(func_def.signature().output_arg(i), func_attr, &type));
-        func_info.f.ret_types[i] = type;
+    std::vector<string> fetch = item.fetch;
+    for (unsigned int i = 0; i < fetch.size(); i++) {
+        const OutputArgExpansion& output_arg = item.output(i);
+        func_info.f.rets[i] = AddPrefixToNodeName(output_arg.output_name, prefix);
+        func_info.f.ret_types[i] = output_arg.data_type;
     }
 
     return Status::OK();
 }
 
-// Various helpers Print(proto) to print relevant protos to ascii.
-string Print(const OpDef::ArgDef& arg) {
-  string out;
-  strings::StrAppend(&out, arg.name(), ":");
-  if (arg.is_ref()) strings::StrAppend(&out, "Ref(");
-  if (!arg.number_attr().empty()) {
-    strings::StrAppend(&out, arg.number_attr(), "*");
-  }
-  if (arg.type() != DT_INVALID) {
-    strings::StrAppend(&out, DataTypeString(arg.type()));
-  } else {
-    strings::StrAppend(&out, arg.type_attr());
-  }
-  if (arg.is_ref()) strings::StrAppend(&out, ")");
-  return out;
-}
-
-// TODO(josh11b): Merge this with SummarizeAttrValue().
-string Print(const AttrValue& attr_value) {
-  if (attr_value.value_case() == AttrValue::kType) {
-    return DataTypeString(attr_value.type());
-  } else if ((attr_value.value_case() == AttrValue::kList) &&
-             (attr_value.list().type_size() > 0)) {
-    string ret = "{";
-    for (int i = 0; i < attr_value.list().type_size(); ++i) {
-      if (i > 0) strings::StrAppend(&ret, ", ");
-      strings::StrAppend(&ret, DataTypeString(attr_value.list().type(i)));
-    }
-    strings::StrAppend(&ret, "}");
-    return ret;
-  } else if (attr_value.value_case() == AttrValue::kFunc) {
-    if (attr_value.func().attr_size() == 0) {
-      return attr_value.func().name();
-    }
-    std::vector<string> entries;
-    for (auto p : attr_value.func().attr()) {
-      entries.push_back(strings::StrCat(p.first, "=", Print(p.second)));
-    }
-    std::sort(entries.begin(), entries.end());
-    return strings::StrCat(attr_value.func().name(), "[",
-                           str_util::Join(entries, ", "), "]");
-  }
-  return SummarizeAttrValue(attr_value);
-}
-
-// TODO(josh11b): Merge this with SummarizeNodeDef().
-string Print(const NodeDef& n) {
-  string out;
-  strings::StrAppend(&out, n.name(), " = ", n.op());
-  if (n.attr_size() > 0) {
-    std::vector<string> entries;
-    for (auto& a : n.attr()) {
-      entries.push_back(strings::StrCat(a.first, "=", Print(a.second)));
-    }
-    std::sort(entries.begin(), entries.end());
-    strings::StrAppend(&out, "[", str_util::Join(entries, ", "), "]");
-  }
-  strings::StrAppend(&out, "(");
-  std::vector<StringPiece> dat;
-  std::vector<string> dep;
-  for (StringPiece s : n.input()) {
-    if (s.Consume("^")) {
-      dep.push_back(s.ToString());
-    } else {
-      dat.push_back(s);
-    }
-  }
-  strings::StrAppend(&out, str_util::Join(dat, ", "), ")");
-  if (!dep.empty()) {
-    strings::StrAppend(&out, " @ ", str_util::Join(dep, ", "));
-  }
-  return out;
-}
-
-string Print(const FunctionDef& fdef) {
-  string out;
-  const OpDef& sig = fdef.signature();
-  strings::StrAppend(&out, "\n", sig.name());
-  if (sig.attr_size() > 0) {
-    strings::StrAppend(&out, "[");
-    for (int i = 0; i < sig.attr_size(); ++i) {
-      const auto& a = sig.attr(i);
-      if (i > 0) strings::StrAppend(&out, ", ");
-      if (a.type() == "type") {
-        strings::StrAppend(&out, a.name(), ":", Print(a.allowed_values()));
-      } else {
-        strings::StrAppend(&out, a.name(), ":", a.type());
-      }
-    }
-    strings::StrAppend(&out, "]");
-  }
-  strings::StrAppend(&out, "(");
-  for (int i = 0; i < sig.input_arg_size(); ++i) {
-    if (i > 0) strings::StrAppend(&out, ", ");
-    strings::StrAppend(&out, Print(sig.input_arg(i)));
-  }
-  strings::StrAppend(&out, ") -> (");
-  for (int i = 0; i < sig.output_arg_size(); ++i) {
-    if (i > 0) strings::StrAppend(&out, ", ");
-    strings::StrAppend(&out, Print(sig.output_arg(i)));
-  }
-  strings::StrAppend(&out, ") {\n");
-  for (const auto& n : fdef.node_def()) {
-    strings::StrAppend(&out, "  ", Print(n), "\n");
-  }
-  for (const auto& r : fdef.ret()) {
-    strings::StrAppend(&out, "  return ", r.first, " = ", r.second, "\n");
-  }
-  strings::StrAppend(&out, "}\n");
-  return out;
-}
-
-string Print(gtl::ArraySlice<const NodeDef*> nodes) {
-  std::vector<const NodeDef*> arg;
-  std::vector<const NodeDef*> ret;
-  std::vector<const NodeDef*> body;
-  for (const NodeDef* n : nodes) {
-    if (n->op() == "_Arg") {
-      arg.push_back(n);
-    } else if (n->op() == "_Retval") {
-      ret.push_back(n);
-    } else {
-      body.push_back(n);
-    }
-  }
-  auto comp = [](const NodeDef* x, const NodeDef* y) {
-    int xi;
-    TF_CHECK_OK(GetNodeAttr(*x, "index", &xi));
-    int yi;
-    TF_CHECK_OK(GetNodeAttr(*y, "index", &yi));
-    return xi < yi;
-  };
-  std::sort(arg.begin(), arg.end(), comp);
-  std::sort(ret.begin(), ret.end(), comp);
-  string out;
-  strings::StrAppend(&out, "\n(");
-  auto get_type = [](const NodeDef& n) {
-    DataType dt;
-    if (!GetNodeAttr(n, "T", &dt).ok()) {
-      dt = DT_INVALID;
-    }
-    return DataTypeString(dt);
-  };
-  for (size_t i = 0; i < arg.size(); ++i) {
-    const NodeDef* n = arg[i];
-    if (i > 0) strings::StrAppend(&out, ", ");
-    CHECK_GE(n->attr_size(), 2);
-    strings::StrAppend(&out, n->name(), ":", get_type(*n));
-  }
-  strings::StrAppend(&out, ") -> (");
-  for (size_t i = 0; i < ret.size(); ++i) {
-    const NodeDef* n = ret[i];
-    if (i > 0) strings::StrAppend(&out, ", ");
-    CHECK_LE(2, n->attr_size());
-    CHECK_EQ(1, n->input_size());
-    strings::StrAppend(&out, n->input(0), ":", get_type(*n));
-  }
-  strings::StrAppend(&out, ") {\n");
-  for (size_t i = 0; i < body.size(); ++i) {
-    strings::StrAppend(&out, "  ", Print(*body[i]), "\n");
-  }
-  strings::StrAppend(&out, "}\n");
-  return out;
-}
-
-Status InlineFunctionAndGradient(const FunctionDef* fdef,
-                      const std::unordered_map<string, AttrValue>& func_attr,
+Status InlineFunctionAndGradient(const FunctionDef& fdef,
+                      const AttrSlice& func_instantiation_attr,
                       const FunctionInliningContext& ctx,
                       const string& device,
                       GraphDef* graph, 
                       FuncGradInfo& func_info) {
-
     // Get func_def's gradient graph
-    const FunctionDef* fgdef = ctx.FindInlinedFunctionAndGradient(fdef->signature().name());
+    const FunctionDef* fgdef = ctx.FindInlinedFunctionAndGradient(fdef.signature().name());
     if (fgdef == nullptr) {
         return errors::InvalidArgument(
                 "Invalid argument, function ", fgdef->signature().name(), "can not be found",
                 "or not marked to be inlined");
     }
 
-    std::unique_ptr<GrapplerItem> item = GrapplerItemFromFunctionDef(*fgdef, func_attr, ctx.Library());
-    
-    if (!item) {
+    GrapplerFunctionItem item;
+    const int graph_version = graph->versions().producer();
+    Status item_status = MakeGrapplerFunctionItem(fdef, func_instantiation_attr, ctx.FunctionLibrary(), graph_version, &item);
+
+    if (!item_status.ok()) {
         return errors::InvalidArgument(
-                 "Failed to inline function (and its gradient)", fdef->signature().name());
+                 "Failed to inline function ", fdef.signature().name(),
+                 "Error: ", item_status.error_message());
     }
-    string prefix = fdef->signature().name();
-    size_t farg_size = fdef->signature().input_arg_size();
-    size_t fret_size = fdef->signature().output_arg_size();
+
+    string prefix = fdef.signature().name();
+    size_t farg_size = fdef.signature().input_arg_size();
+    size_t fret_size = fdef.signature().output_arg_size();
     size_t garg_size = fgdef->signature().input_arg_size() - farg_size;
     size_t gret_size = fgdef->signature().output_arg_size() - fret_size;
 
@@ -761,30 +619,18 @@ Status InlineFunctionAndGradient(const FunctionDef* fdef,
     func_info.g.arg_types.resize(farg_size + garg_size);
     func_info.g.ret_types.resize(farg_size);
     for (int i = 0; i < farg_size; i++) {
-      const OpDef::ArgDef& arg = fgdef->signature().input_arg(i);
-      const OpDef::ArgDef& darg = fgdef->signature().output_arg(fret_size + i);
-      DataType type;
-      TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
-      //DataType dtype;
-      //TF_RETURN_IF_ERROR(CopyArgType(darg, func_attr, &dtype));
-      //CHECK_EQ(type, dtype);
-      func_info.f.arg_types[i] = type;
-      func_info.g.arg_types[i] = type;
-      func_info.g.ret_types[i] = type;
+      const InputArgExpansion& input_arg = item.input(i);
+      func_info.f.arg_types[i] = input_arg.data_type;
+      func_info.g.arg_types[i] = input_arg.data_type;
+      func_info.g.ret_types[i] = input_arg.data_type;
     }
 
 
     func_info.f.ret_types.resize(fret_size);
     for (int i = 0; i < fret_size; i++) {
-      const OpDef::ArgDef& arg  = fgdef->signature().output_arg(i);
-      const OpDef::ArgDef& darg = fgdef->signature().input_arg(farg_size + i);
-      DataType type;
-      TF_RETURN_IF_ERROR(CopyArgType(arg, func_attr, &type));
-      //DataType dtype;
-      //TF_RETURN_IF_ERROR(CopyArgType(darg, func_attr, &dtype));
-      //CHECK_EQ(type, dtype);
-      func_info.f.ret_types[i] = type;
-      func_info.g.arg_types[farg_size + i] = type;
+      const OutputArgExpansion& output_arg = item.output(i);
+      func_info.f.ret_types[i] = output_arg.data_type;
+      func_info.g.arg_types[farg_size + i] = output_arg.data_type;
     }
 
     // create an inverse map of arg to provide name -> argument number
@@ -792,10 +638,10 @@ Status InlineFunctionAndGradient(const FunctionDef* fdef,
     std::vector<string> input_names;
     input_names.resize(farg_size);
     for (int i = 0; i < farg_size + garg_size; ++i) {
-        const OpDef::ArgDef& arg = fgdef->signature().input_arg(i);
-        input_map[arg.name()] = i;
+        const InputArgExpansion& input_arg = item.input(i);
+        input_map[input_arg.input_name] = i;
         if (i < farg_size) {
-          input_names[i] = arg.name();
+          input_names[i] = input_arg.input_name;
         }
     }
 
@@ -806,16 +652,17 @@ Status InlineFunctionAndGradient(const FunctionDef* fdef,
 
     // prefix each node in function graph and place it to the global graph.
     // the inputs of each node need to be renamed as well to reflect the change.
-    for (NodeDef& n : *item->graph.mutable_node()) {
+    for (NodeDef& n : *item.mutable_function_body().mutable_node()) {
         // If the func body node is func's input argument
         auto input_it = input_map.find(n.name());
         bool is_input = input_it != input_map.end();
 
-        if (is_input) {
+        if (item.IsInputPlaceholder(n.name())) {
           CHECK_EQ(0, n.input_size());
-          if (IsPlaceholder(n)) {
-            n.set_op(kIdentityOp);
-          }
+          n.set_op(kIdentityOp);
+          (*n.mutable_attr())["T"] = n.attr().at("dtype");
+          n.mutable_attr()->erase("dtype");
+          n.mutable_attr()->erase("shape");
         }
 
         // Add the node name as a prefix to avoid collisions after inlining
@@ -860,10 +707,11 @@ Status InlineFunctionAndGradient(const FunctionDef* fdef,
         }
     }
 
-    CHECK_EQ(fret_size + gret_size, item->fetch.size());
+    CHECK_EQ(fret_size + gret_size, item.fetch.size());
 
     for (unsigned int i = 0; i < fret_size + gret_size; i++) {
-        string output_port = AddPrefixToNodeName(item->fetch[i], prefix);
+        const OutputArgExpansion& output_arg = item.output(i);
+        string output_port = AddPrefixToNodeName(output_arg.output_name, prefix);
         if (i < fret_size) {
           func_info.f.rets[i] = output_port;
         } else {
@@ -896,14 +744,15 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
                         "or not marked to be inlined");
     }
 
-    std::unordered_map<string, AttrValue> func_attr(call.fcall->attr().begin(), call.fcall->attr().end());
+    const AttrSlice func_instantiation_attr =
+        FunctionInstantiationAttributes(*func_def, *call.fcall);
 
     if (call.hasGradient()) {
       TF_RETURN_IF_ERROR(
-              InlineFunctionAndGradient(func_def, func_attr, ctx, device, graph, func_info));
+              InlineFunctionAndGradient(*func_def, func_instantiation_attr, ctx, device, graph, func_info));
     } else { 
       TF_RETURN_IF_ERROR(
-              InlineFunction(*func_def, func_attr, ctx, device, graph, func_info));
+              InlineFunction(*func_def, func_instantiation_attr, ctx, device, graph, func_info));
     }
     transformed_functions_[func_name] = func_info;
     printf("Store inlined function %s\n", func_name.c_str());
@@ -928,7 +777,7 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
         if (calls.empty()) {
             break;
         }
-        for (CallInfo& call : calls) {
+        for (const CallInfo& call : calls) {
             Status s = call_rewriter.TransformCall(call);
             if (!s.ok()) {
               printf("Error: %s\n", s.error_message().c_str());
