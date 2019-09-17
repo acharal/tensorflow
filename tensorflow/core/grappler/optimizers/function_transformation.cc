@@ -287,14 +287,17 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
         }
     }
     for (NodeDef* gcall : gradients) {
-        const string& n = gcall->attr().at("_n").s();
-        auto fcall_it = call_map.find(n);
-        if (fcall_it == call_map.end()) {
-            return errors::InvalidArgument("Cannot find forward node for gradient ",
-                    gcall->name());
+        if (gcall->attr().count("_n") > 0) {
+          const string& n = gcall->attr().at("_n").s();
+        
+          auto fcall_it = call_map.find(n);
+          if (fcall_it == call_map.end()) {
+              return errors::InvalidArgument("Cannot find forward node for gradient ",
+                      gcall->name());
+          }
+          CallInfo& call = fcall_it->second;
+          call.gcall = gcall;
         }
-        CallInfo& call = fcall_it->second;
-        call.gcall = gcall;
     }
 
     for (const auto& it : call_map) {
