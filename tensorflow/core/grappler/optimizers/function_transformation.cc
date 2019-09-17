@@ -244,8 +244,13 @@ class CallRewriter {
     }
 
     void MarkCallTransformed(CallInfo& call_info) {
+      CHECK_NOTNULL(call_info.fcall);
+      
       MarkNodeDelete(call_info.fcall);
-      MarkNodeDelete(call_info.gcall);
+      
+      if (call_info.gcall != nullptr) {
+        MarkNodeDelete(call_info.gcall);
+      }
     }
 
     void MarkNodeDelete(NodeDef* n) {
@@ -874,6 +879,7 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
             const CallInfo& call,
             GraphDef* graph,
             FuncGradInfo& func_info) {
+    CHECK_NOTNULL(call->fcall);
     const string& func_name = call.fcall->op();
     string device = call.fcall->device();
     const auto& it = transformed_functions_.find(func_name);
