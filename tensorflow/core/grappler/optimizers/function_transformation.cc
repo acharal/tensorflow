@@ -244,8 +244,13 @@ class CallRewriter {
     }
 
     void MarkCallTransformed(CallInfo& call_info) {
+      CHECK_NOTNULL(call_info.fcall);
+
       MarkNodeDelete(call_info.fcall);
-      MarkNodeDelete(call_info.gcall);
+      
+      if (call_info.gcall != nullptr) {
+        MarkNodeDelete(call_info.gcall);
+      }
     }
 
     void MarkNodeDelete(NodeDef* n) {
@@ -287,14 +292,17 @@ Status CallRewriter::CollectCalls(std::vector<CallInfo>& calls) {
         }
     }
     for (NodeDef* gcall : gradients) {
-        const string& n = gcall->attr().at("_n").s();
-        auto fcall_it = call_map.find(n);
-        if (fcall_it == call_map.end()) {
-            return errors::InvalidArgument("Cannot find forward node for gradient ",
-                    gcall->name());
+        if (gcall->attr().count("_n") > 0) {
+          const string& n = gcall->attr().at("_n").s();
+        
+          auto fcall_it = call_map.find(n);
+          if (fcall_it == call_map.end()) {
+              return errors::InvalidArgument("Cannot find forward node for gradient ",
+                      gcall->name());
+          }
+          CallInfo& call = fcall_it->second;
+          call.gcall = gcall;
         }
-        CallInfo& call = fcall_it->second;
-        call.gcall = gcall;
     }
 
     for (const auto& it : call_map) {
@@ -871,6 +879,7 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
             const CallInfo& call,
             GraphDef* graph,
             FuncGradInfo& func_info) {
+    CHECK_NOTNULL(call.fcall);
     const string& func_name = call.fcall->op();
     string device = call.fcall->device();
     const auto& it = transformed_functions_.find(func_name);
