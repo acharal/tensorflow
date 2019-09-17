@@ -381,7 +381,8 @@ def gradients(ys,
               colocate_gradients_with_ops=False,
               gate_gradients=False,
               aggregation_method=None,
-              stop_gradients=None):
+              stop_gradients=None,
+              functions=None):
   """Constructs symbolic derivatives of sum of `ys` w.r.t. x in `xs`.
 
   `ys` and `xs` are each a `Tensor` or a list of tensors.  `grad_ys`
@@ -540,10 +541,14 @@ def gradients(ys,
         # pylint: disable=protected-access
         func_call = None
         is_func_call = ops.get_default_graph()._is_function(op.type)
+        if not is_func_call and functions is not None:
+          is_func_call = op.type in functions
         has_out_grads = any(isinstance(g, ops.Tensor) or g for g in out_grads)
         if has_out_grads and (op._id not in stop_ops):
           if is_func_call:
             func_call = ops.get_default_graph()._get_function(op.type)
+            if func_call is None and functions is not None:
+              func_call = functions.get(op.type, None)
             grad_fn = func_call.python_grad_func
             # pylint: enable=protected-access
           else:

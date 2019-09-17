@@ -331,7 +331,7 @@ class _DefinedFunction(object):
       self._args.append((argname, argtype))
 
     if self._create_grad_func:
-        grad_func_name = self._func_name + "Grad"
+        grad_func_name = self._func_name # + "Grad"
         out_names = self._out_names.copy()
         for (argname, argtype) in self._args:
             out_names.append("d" + argname)
@@ -406,9 +406,13 @@ class _DefinedFunction(object):
 
   def _create_definition_if_needed_impl(self):
     """This is not what you want, see _create_definition_if_needed."""
-    if self._definition is not None or self._c_func is not None:
-      return
 
+    if self._definition is not None or self._c_func is not None \
+            or (self._is_gradient and not ops.get_default_graph()._is_function(self._func_name)):
+            # Defer the construction of a function's gradient until after the function's registration
+        return
+
+    functions = ops.get_default_graph()._functions
     # Create the func_def object.
     temp_graph = _FuncGraph(capture_by_value=self._capture_by_value)
     with temp_graph.as_default():
@@ -420,12 +424,13 @@ class _DefinedFunction(object):
       # Call func and gather the output tensors.
       with vs.variable_scope("", custom_getter=temp_graph.getvar):
         if self._is_gradient:
+          self._func_name = self._func_name + "Grad"
           outputs = [self._func(*inputs)]
           dinputs = []
           for (out, name) in list(zip(outputs, self._out_names)):
             argholder = array_ops.placeholder(out.op.node_def.attr["T"].type, name="d"+name)
             dinputs.append(argholder)
-          doutputs = gradients_impl.gradients(outputs, inputs, dinputs)
+          doutputs = gradients_impl.gradients(outputs, inputs, dinputs, functions=functions)
           if not isinstance(doutputs, list):
             doutputs = [doutputs]
           outputs.extend(doutputs)
