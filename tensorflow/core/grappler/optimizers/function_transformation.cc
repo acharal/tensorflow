@@ -31,6 +31,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/op_types.h"
 #include "tensorflow/core/grappler/utils.h"
 #include "tensorflow/core/grappler/utils/functions.h"
+#include "tensorflow/core/lib/gtl/map_util.h"
 
 namespace tensorflow {
 namespace grappler {
@@ -111,6 +112,7 @@ class FunctionInliningContext {
             : function_library_(FunctionLibraryDefinition(OpRegistry::Global(),
                                                     item.graph.library())) {
       InitializeInlinedFunctions(item);
+      InitializeFetchNodes(item);
     }
 
 
@@ -126,12 +128,11 @@ class FunctionInliningContext {
 
     // Find inlining candidate by name. Return nullptr if not found.
     const FunctionDef* FindInlinedFunction(const string& name) const {
-      auto it = inlined_functions_.find(name);
-      if (it != inlined_functions_.end()) {
-        return it->second;
-      } else {
-        return nullptr;
-      }
+      return gtl::FindWithDefault(inlined_functions_, name, nullptr);
+    }
+
+    bool IsFetchNode(const string& node_name) const {
+      return fetch_nodes_.find(node_name) != fetch_nodes_.end();
     }
 
     const FunctionDef* FindInlinedFunctionAndGradient(const string& name) const {
@@ -164,8 +165,17 @@ class FunctionInliningContext {
       }
     }
 
+    void InitializeFetchNodes(const GrapplerItem& item) {
+      for (const string& fetch : item.fetch) {
+        fetch_tensors_.insert(fetch);
+        fetch_nodes_.insert(NodeName(fetch));
+      }
+    }
+
     FunctionLibraryDefinition function_library_;
     std::unordered_map<string, const FunctionDef*> inlined_functions_;	
+    gtl::FlatSet<string> fetch_tensors_;  // format: node_name:port
+    gtl::FlatSet<string> fetch_nodes_;    // format: node_name
 
     TF_DISALLOW_COPY_AND_ASSIGN(FunctionInliningContext);
 };
@@ -246,14 +256,6 @@ class CallRewriter {
             NodeDef* call, const FuncInfo& f, 
             std::vector<NodeDef*>& call_nodes,
             std::vector<NodeDef*>& ret_nodes);
-
-    bool ShouldPreserveOutputs(const string& node) {
-        for (const string& fetch_out : item.fetch) {
-            if (NodeName(fetch_out) == node)
-                return true;
-        }
-        return false;
-    }
 
     void ReplaceOutput(const string& old_output, const string& new_output) {
         // maybe some more checks
@@ -411,6 +413,19 @@ Status CallRewriter::TransformNode(const CallInfo& info,
       }
   }
 
+  // check for control edges in call
+  gtl::FlatSet<string> control_inputs;
+  for (const string& input : call->input()) {
+    if (IsControlInput(input)) {
+      control_inputs.insert(NodeName(input));
+    }
+  }
+
+  for (NodeDef* call_node : call_nodes) {
+    for (const string& control_input : control_inputs)
+    *(call_node->add_input()) = AsControlDependency(control_input);
+  }
+
   ret_nodes.resize(f.rets.size());
   for (unsigned int i = 0; i < f.rets.size(); i++) {
       if (ret_nodes[i] != nullptr) {
@@ -428,15 +443,7 @@ Status CallRewriter::TransformNode(const CallInfo& info,
       }
   }
 
-  // for each call create a control dependency to each return
-  // to facilitate dead propagation semantics
-  for (NodeDef* ret : ret_nodes) {
-      for (NodeDef* call : call_nodes)
-        // TODO: Check if there is already a control dependency.
-        *(ret->add_input()) = AsControlDependency(call->name());
-  }
-
-  if (ShouldPreserveOutputs(call->name())) {
+  if (ctx.IsFetchNode(call->name())) {
       // create an IdentityN with the same name of the initial function call
       // so as to preserve the naming of the outputs.
       // we re-use the initial node and we change (a) the op to IdentityN and
@@ -462,6 +469,15 @@ Status CallRewriter::TransformNode(const CallInfo& info,
           ReplaceOutput(call->name(), ret_nodes[0]->name());
       }
   }
+
+  // for each call create a control dependency to each return
+  // to facilitate dead propagation semantics
+  for (NodeDef* ret : ret_nodes) {
+      for (NodeDef* call : call_nodes)
+        // TODO: Check if there is already a control dependency.
+        *(ret->add_input()) = AsControlDependency(call->name());
+  }
+
   return Status::OK();
 }
 
