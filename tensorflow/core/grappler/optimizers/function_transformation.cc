@@ -575,7 +575,7 @@ Status InlineFunction(const FunctionDef& func_def,
     std::vector<string> fetch = item.fetch;
     for (unsigned int i = 0; i < fetch.size(); i++) {
         const OutputArgExpansion& output_arg = item.output(i);
-        func_info.f.rets[i] = AddPrefixToNodeName(output_arg.output_name, prefix);
+        func_info.f.rets[i] = AddPrefixToNodeName(output_arg.output_tensors[0], prefix);
         func_info.f.ret_types[i] = output_arg.data_type;
     }
 
@@ -598,7 +598,7 @@ Status InlineFunctionAndGradient(const FunctionDef& fdef,
 
     GrapplerFunctionItem item;
     const int graph_version = graph->versions().producer();
-    Status item_status = MakeGrapplerFunctionItem(fdef, func_instantiation_attr, ctx.FunctionLibrary(), graph_version, &item);
+    Status item_status = MakeGrapplerFunctionItem(*fgdef, func_instantiation_attr, ctx.FunctionLibrary(), graph_version, &item);
 
     if (!item_status.ok()) {
         return errors::InvalidArgument(
@@ -625,7 +625,6 @@ Status InlineFunctionAndGradient(const FunctionDef& fdef,
       func_info.g.ret_types[i] = input_arg.data_type;
     }
 
-
     func_info.f.ret_types.resize(fret_size);
     for (int i = 0; i < fret_size; i++) {
       const OutputArgExpansion& output_arg = item.output(i);
@@ -644,7 +643,6 @@ Status InlineFunctionAndGradient(const FunctionDef& fdef,
           input_names[i] = input_arg.input_name;
         }
     }
-
     func_info.f.args.resize(farg_size);
     func_info.f.rets.resize(fret_size);
     func_info.g.args.resize(farg_size + garg_size);
@@ -711,7 +709,7 @@ Status InlineFunctionAndGradient(const FunctionDef& fdef,
 
     for (unsigned int i = 0; i < fret_size + gret_size; i++) {
         const OutputArgExpansion& output_arg = item.output(i);
-        string output_port = AddPrefixToNodeName(output_arg.output_name, prefix);
+        string output_port = AddPrefixToNodeName(output_arg.output_tensors[0], prefix);
         if (i < fret_size) {
           func_info.f.rets[i] = output_port;
         } else {
