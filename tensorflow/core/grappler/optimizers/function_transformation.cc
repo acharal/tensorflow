@@ -188,6 +188,14 @@ struct CallInfo {
   bool hasGradient() const { return (gcall != nullptr); }
 };
 
+struct TransformationResult {
+  int call_id;
+  string call_frame;
+  NodeDef* transformed_node;
+  std::vector<NodeDef*> call_nodes;
+  std::vector<NodeDef*> ret_nodes;
+};
+
 class CallRewriter {
 
   public:
@@ -231,6 +239,10 @@ class CallRewriter {
       }
     }
 
+    void MarkTransformed(TransformationResult& result) {
+      transformed_calls_.insert(result);
+    }
+
     void MarkNodeDelete(NodeDef* n) {
       n->clear_input();
       n->set_op("NoOp");
@@ -243,6 +255,7 @@ class CallRewriter {
     const GrapplerItem& item;
     std::unordered_map<string, FuncGradInfo> transformed_functions_;
     std::unordered_map<string, string> output_map_;
+    std::set<TransformationResult> transformed_calls_;
     std::set<string> nodes_to_delete;
     int id = 0;
 
@@ -675,23 +688,27 @@ Status CallRewriter::TransformNode(const CallInfo& info,
 
 Status CallRewriter::TransformCall(const CallInfo& call_info) {
     FuncGradInfo func_info;
+    TransformationResult result;
 
     // inlines the body of a function and provides a struct with func_info
     TF_RETURN_IF_ERROR(FindCompatibleOrInlineFunction(call_info, graph, func_info));
 
-    std::vector<NodeDef*> call_nodes;
-    std::vector<NodeDef*> ret_nodes;
-    std::vector<NodeDef*> gret_nodes;
-    TF_RETURN_IF_ERROR(TransformNode(call_info, call_info.fcall, func_info.f, call_nodes, ret_nodes));
+    result.call_id = call_info.call_id;
+    result.call_frame = call_info.call_frame;
+
+    TF_RETURN_IF_ERROR(TransformNode(call_info, call_info.fcall, func_info.f, result.call_nodes, result.ret_nodes));
+    MarkTransformed(grad_result);
 
     if (call_info.hasGradient()) {
+      TransformationResult grad_result;
+      grad_result.call_id = call_info.call_id;
+      grad_result.call_frame = call_info.call_frame;
+      grad_result.call_nodes = result.call_nodes;
       // keep all the inputs of the function
-      TF_RETURN_IF_ERROR(TransformNode(call_info, call_info.gcall, func_info.g, call_nodes, gret_nodes));
+      TF_RETURN_IF_ERROR(TransformNode(call_info, call_info.gcall, func_info.g, grad_result.call_nodes, grad_result.gret_nodes));
+      MarkTransformed(grad_result);
     }
-
-    printf("Mark call %s (function %s) as transformed\n", call_info.fcall->name().c_str(), call_info.fcall->op().c_str());
     MarkCallTransformed(call_info);
-
     return Status::OK();
 }
 
