@@ -242,10 +242,11 @@ class CallRewriter {
     void MarkTransformed(TransformationResult& result) {
       NodeDef* n = result.transformed_node;
       CHECK_NOTNULL(n);
+      transformed_calls_[result.transformed_node->name()] = result;
       n->clear_input();
       n->set_op("NoOp");
       n->set_name(AddPrefixToNodeName(n->name(), "$MarkToDelete$"));
-      transformed_calls_[n->name()] = result;
+      nodes_to_delete.insert(n->name());
     }
 
     void MarkNodeDelete(NodeDef* n) {
@@ -762,7 +763,7 @@ void CallRewriter::Flush() {
         int last = graph->node_size() - 1;
         for (int i = graph->node_size() - 1; i >= 0; --i) {
             const NodeDef& node = graph->node(i);
-            if (transformed_calls_.find(node.name()) != transformed_calls_.end()) {
+            if (nodes_to_delete.find(node.name()) != nodes_to_delete.end()) {
                 graph->mutable_node()->SwapElements(i,last);
                 last--;
             }
@@ -771,21 +772,34 @@ void CallRewriter::Flush() {
                                               graph->node_size() - last - 1);
     }
     if (!output_map_.empty()) {
-        // change all the recorded outputs;
-        // the new outputs where produced by the addition of the RetOp and
-        // the substitution was deferred to increase performance
-        for (NodeDef& node : *graph->mutable_node()) {
-            int last = node.input_size() - 1;
-            for (string& in : *node.mutable_input()) {
-                auto it = output_map_.find(in);
-                if (it != output_map_.end()) {
-                    in = it->second;
-                }
-            }
+      std::vector<TransformationResult> control_nodes;
+      int last = node.input_size() - 1;
+
+      for (int i = node.input_size() - 1; i >= 0; --i) {
+        string& in = *node.mutable_input(i);
+        auto it = output_map_.find(in);
+        if (it != output_map_.end()) {
+          in = it->second;
         }
-        
+        if (IsControlInput(in)) {
+          auto it = transformed_calls_.find(NodeName(in));
+          if (it != transformed_calls_.end()) {
+            node.mutable_input()->SwapElements(i, last);
+            control_nodes.push_back(it->second);
+            last--;
+          }
+        }
+        node.mutable_input()->DeleteSubrange(last + 1,
+                                            node.input_size() - last - 1);
+        for (TransformationResult& result : control_nodes) {
+          for (NodeDef* ret_node : result.ret_nodes) {
+            *node.add_input() = AsControlDependency(ret_node->name());
+          }
+        }
+      }
     }
     transformed_calls_.clear();
+    nodes_to_delete.clear();
     output_map_.clear();
 }
 
