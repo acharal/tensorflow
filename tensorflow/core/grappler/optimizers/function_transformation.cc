@@ -705,7 +705,7 @@ Status CallRewriter::TransformCall(const CallInfo& call_info) {
       grad_result.call_frame = call_info.call_frame;
       grad_result.call_nodes = result.call_nodes;
       // keep all the inputs of the function
-      TF_RETURN_IF_ERROR(TransformNode(call_info, call_info.gcall, func_info.g, grad_result.call_nodes, grad_result.gret_nodes));
+      TF_RETURN_IF_ERROR(TransformNode(call_info, call_info.gcall, func_info.g, grad_result.call_nodes, grad_result.ret_nodes));
       MarkTransformed(grad_result);
     }
     MarkCallTransformed(call_info);
