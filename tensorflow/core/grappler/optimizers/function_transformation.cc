@@ -255,7 +255,7 @@ class CallRewriter {
     const GrapplerItem& item;
     std::unordered_map<string, FuncGradInfo> transformed_functions_;
     std::unordered_map<string, string> output_map_;
-    std::set<TransformationResult> transformed_calls_;
+    std::vector<TransformationResult> transformed_calls_;
     std::set<string> nodes_to_delete;
     int id = 0;
 
