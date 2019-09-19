@@ -240,7 +240,7 @@ class CallRewriter {
     }
 
     void MarkTransformed(TransformationResult& result) {
-      transformed_calls_.push_back(result);
+      transformed_calls_[result.transformed_node->name()] = result;
     }
 
     void MarkNodeDelete(NodeDef* n) {
@@ -255,7 +255,7 @@ class CallRewriter {
     const GrapplerItem& item;
     std::unordered_map<string, FuncGradInfo> transformed_functions_;
     std::unordered_map<string, string> output_map_;
-    std::vector<TransformationResult> transformed_calls_;
+    std::unordered_map<string, TransformationResult> transformed_calls_;
     std::set<string> nodes_to_delete;
     int id = 0;
 
@@ -749,28 +749,26 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
 }
 
 void CallRewriter::Flush() {
-    if (!nodes_to_delete.empty()) {
+
+    if (!transformed_calls_.empty()) {
         // garbage collect the transformed call nodes
         int last = graph->node_size() - 1;
         for (int i = graph->node_size() - 1; i >= 0; --i) {
             const NodeDef& node = graph->node(i);
-            if (nodes_to_delete.find(node.name()) != nodes_to_delete.end()) {
+            if (transformed_calls_.find(node.name()) != transformed_calls_.end()) {
                 graph->mutable_node()->SwapElements(i,last);
                 last--;
             }
         }
-
         graph->mutable_node()->DeleteSubrange(last + 1,
                                               graph->node_size() - last - 1);
-
-        nodes_to_delete.clear();
     }
-
     if (!output_map_.empty()) {
         // change all the recorded outputs;
         // the new outputs where produced by the addition of the RetOp and
         // the substitution was deferred to increase performance
         for (NodeDef& node : *graph->mutable_node()) {
+            int last = node.input_size() - 1;
             for (string& in : *node.mutable_input()) {
                 auto it = output_map_.find(in);
                 if (it != output_map_.end()) {
@@ -778,8 +776,10 @@ void CallRewriter::Flush() {
                 }
             }
         }
-        output_map_.clear();
+        
     }
+    transformed_calls_.clear();
+    output_map_.clear();
 }
 
 }  // namespace
