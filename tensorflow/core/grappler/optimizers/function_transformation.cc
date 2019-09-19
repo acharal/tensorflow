@@ -240,7 +240,7 @@ class CallRewriter {
     }
 
     void MarkTransformed(TransformationResult& result) {
-      transformed_calls_.insert(result);
+      transformed_calls_.push_back(result);
     }
 
     void MarkNodeDelete(NodeDef* n) {
