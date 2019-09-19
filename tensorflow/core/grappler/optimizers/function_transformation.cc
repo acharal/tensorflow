@@ -240,7 +240,12 @@ class CallRewriter {
     }
 
     void MarkTransformed(TransformationResult& result) {
-      transformed_calls_[result.transformed_node->name()] = result;
+      NodeDef* n = result.transformed_node;
+      CHECK_NOTNULL(n);
+      n->clear_input();
+      n->set_op("NoOp");
+      n->set_name(AddPrefixToNodeName(n->name(), "$MarkToDelete$"));
+      transformed_calls_[n->name()] = result;
     }
 
     void MarkNodeDelete(NodeDef* n) {
