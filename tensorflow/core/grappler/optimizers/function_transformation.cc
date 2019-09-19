@@ -697,7 +697,7 @@ Status CallRewriter::TransformCall(const CallInfo& call_info) {
     result.call_frame = call_info.call_frame;
 
     TF_RETURN_IF_ERROR(TransformNode(call_info, call_info.fcall, func_info.f, result.call_nodes, result.ret_nodes));
-    MarkTransformed(grad_result);
+    MarkTransformed(result);
 
     if (call_info.hasGradient()) {
       TransformationResult grad_result;
