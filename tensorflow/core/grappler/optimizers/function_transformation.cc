@@ -188,6 +188,14 @@ struct CallInfo {
   bool hasGradient() const { return (gcall != nullptr); }
 };
 
+struct TransformationResult {
+  int call_id;
+  string call_frame;
+  NodeDef* transformed_node;
+  std::vector<NodeDef*> call_nodes;
+  std::vector<NodeDef*> ret_nodes;
+};
+
 class CallRewriter {
 
   public:
@@ -231,6 +239,16 @@ class CallRewriter {
       }
     }
 
+    void MarkTransformed(TransformationResult& result) {
+      NodeDef* n = result.transformed_node;
+      CHECK_NOTNULL(n);
+      transformed_calls_[result.transformed_node->name()] = result;
+      n->clear_input();
+      n->set_op("NoOp");
+      n->set_name(AddPrefixToNodeName(n->name(), "$MarkToDelete$"));
+      nodes_to_delete.insert(n->name());
+    }
+
     void MarkNodeDelete(NodeDef* n) {
       n->clear_input();
       n->set_op("NoOp");
@@ -243,6 +261,7 @@ class CallRewriter {
     const GrapplerItem& item;
     std::unordered_map<string, FuncGradInfo> transformed_functions_;
     std::unordered_map<string, string> output_map_;
+    std::unordered_map<string, TransformationResult> transformed_calls_;
     std::set<string> nodes_to_delete;
     int id = 0;
 
@@ -675,23 +694,29 @@ Status CallRewriter::TransformNode(const CallInfo& info,
 
 Status CallRewriter::TransformCall(const CallInfo& call_info) {
     FuncGradInfo func_info;
+    TransformationResult result;
 
     // inlines the body of a function and provides a struct with func_info
     TF_RETURN_IF_ERROR(FindCompatibleOrInlineFunction(call_info, graph, func_info));
 
-    std::vector<NodeDef*> call_nodes;
-    std::vector<NodeDef*> ret_nodes;
-    std::vector<NodeDef*> gret_nodes;
-    TF_RETURN_IF_ERROR(TransformNode(call_info, call_info.fcall, func_info.f, call_nodes, ret_nodes));
+    result.call_id = call_info.call_id;
+    result.call_frame = call_info.call_frame;
+    result.transformed_node = call_info.fcall;
+
+    TF_RETURN_IF_ERROR(TransformNode(call_info, call_info.fcall, func_info.f, result.call_nodes, result.ret_nodes));
+    MarkTransformed(result);
 
     if (call_info.hasGradient()) {
+      TransformationResult grad_result;
+      grad_result.call_id = call_info.call_id;
+      grad_result.call_frame = call_info.call_frame;
+      grad_result.transformed_node = call_info.gcall;
+      grad_result.call_nodes = result.call_nodes;
       // keep all the inputs of the function
-      TF_RETURN_IF_ERROR(TransformNode(call_info, call_info.gcall, func_info.g, call_nodes, gret_nodes));
+      TF_RETURN_IF_ERROR(TransformNode(call_info, call_info.gcall, func_info.g, grad_result.call_nodes, grad_result.ret_nodes));
+      MarkTransformed(grad_result);
     }
-
-    printf("Mark call %s (function %s) as transformed\n", call_info.fcall->name().c_str(), call_info.fcall->op().c_str());
     MarkCallTransformed(call_info);
-
     return Status::OK();
 }
 
@@ -732,7 +757,8 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
 }
 
 void CallRewriter::Flush() {
-    if (!nodes_to_delete.empty()) {
+
+    if (!transformed_calls_.empty()) {
         // garbage collect the transformed call nodes
         int last = graph->node_size() - 1;
         for (int i = graph->node_size() - 1; i >= 0; --i) {
@@ -742,27 +768,41 @@ void CallRewriter::Flush() {
                 last--;
             }
         }
-
         graph->mutable_node()->DeleteSubrange(last + 1,
                                               graph->node_size() - last - 1);
-
-        nodes_to_delete.clear();
     }
-
     if (!output_map_.empty()) {
-        // change all the recorded outputs;
-        // the new outputs where produced by the addition of the RetOp and
-        // the substitution was deferred to increase performance
-        for (NodeDef& node : *graph->mutable_node()) {
-            for (string& in : *node.mutable_input()) {
-                auto it = output_map_.find(in);
-                if (it != output_map_.end()) {
-                    in = it->second;
-                }
+      for (NodeDef& node : *graph->mutable_node()) {
+        std::vector<TransformationResult> control_nodes;
+        int last = node.input_size() - 1;
+
+        for (int i = node.input_size() - 1; i >= 0; --i) {
+          string& in = *node.mutable_input(i);
+          auto it = output_map_.find(in);
+          if (it != output_map_.end()) {
+            in = it->second;
+          }
+          if (IsControlInput(in)) {
+            auto it = transformed_calls_.find(NodeName(in));
+            if (it != transformed_calls_.end()) {
+              node.mutable_input()->SwapElements(i, last);
+              control_nodes.push_back(it->second);
+              last--;
             }
+          }
+          node.mutable_input()->DeleteSubrange(last + 1,
+                                              node.input_size() - last - 1);
+          for (TransformationResult& result : control_nodes) {
+            for (NodeDef* ret_node : result.ret_nodes) {
+              *node.add_input() = AsControlDependency(ret_node->name());
+            }
+          }
         }
-        output_map_.clear();
+      }
     }
+    transformed_calls_.clear();
+    nodes_to_delete.clear();
+    output_map_.clear();
 }
 
 }  // namespace
