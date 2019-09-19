@@ -772,28 +772,30 @@ void CallRewriter::Flush() {
                                               graph->node_size() - last - 1);
     }
     if (!output_map_.empty()) {
-      std::vector<TransformationResult> control_nodes;
-      int last = node.input_size() - 1;
+      for (NodeDef& node : *graph->mutable_node()) {
+        std::vector<TransformationResult> control_nodes;
+        int last = node.input_size() - 1;
 
-      for (int i = node.input_size() - 1; i >= 0; --i) {
-        string& in = *node.mutable_input(i);
-        auto it = output_map_.find(in);
-        if (it != output_map_.end()) {
-          in = it->second;
-        }
-        if (IsControlInput(in)) {
-          auto it = transformed_calls_.find(NodeName(in));
-          if (it != transformed_calls_.end()) {
-            node.mutable_input()->SwapElements(i, last);
-            control_nodes.push_back(it->second);
-            last--;
+        for (int i = node.input_size() - 1; i >= 0; --i) {
+          string& in = *node.mutable_input(i);
+          auto it = output_map_.find(in);
+          if (it != output_map_.end()) {
+            in = it->second;
           }
-        }
-        node.mutable_input()->DeleteSubrange(last + 1,
-                                            node.input_size() - last - 1);
-        for (TransformationResult& result : control_nodes) {
-          for (NodeDef* ret_node : result.ret_nodes) {
-            *node.add_input() = AsControlDependency(ret_node->name());
+          if (IsControlInput(in)) {
+            auto it = transformed_calls_.find(NodeName(in));
+            if (it != transformed_calls_.end()) {
+              node.mutable_input()->SwapElements(i, last);
+              control_nodes.push_back(it->second);
+              last--;
+            }
+          }
+          node.mutable_input()->DeleteSubrange(last + 1,
+                                              node.input_size() - last - 1);
+          for (TransformationResult& result : control_nodes) {
+            for (NodeDef* ret_node : result.ret_nodes) {
+              *node.add_input() = AsControlDependency(ret_node->name());
+            }
           }
         }
       }
