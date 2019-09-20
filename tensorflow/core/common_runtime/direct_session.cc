@@ -19,6 +19,10 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include <time.h>
+#include <iostream>
+
+
 #include "tensorflow/core/common_runtime/constant_folding.h"
 #include "tensorflow/core/common_runtime/debugger_state_interface.h"
 #include "tensorflow/core/common_runtime/device_factory.h"
@@ -581,6 +585,8 @@ Status DirectSession::Run(const RunOptions& run_options,
     return errors::Cancelled("Run call was cancelled");
   }
 
+  clock_t t;
+  t = clock();
   for (const auto& item : executors_and_keys->items) {
     item.executor->RunAsync(args, barrier->Get());
   }
@@ -589,6 +595,10 @@ Status DirectSession::Run(const RunOptions& run_options,
                       run_options.timeout_in_ms() > 0
                           ? run_options.timeout_in_ms()
                           : operation_timeout_in_ms_);
+
+  t = clock() - t;
+  std::cout << "time: " << t << " miliseconds" << std::endl;
+  std::cout << "time: " << t*1.0/CLOCKS_PER_SEC << " seconds" << std::endl;
 
   if (!cancellation_manager_->DeregisterCallback(cancellation_token)) {
     // The step has been cancelled: make sure we don't attempt to receive the
