@@ -17,8 +17,8 @@ batch_size = 10
 # W2 = tf.get_variable('W2', [300, 10], initializer=tf.constant_initializer(0.0))
 # b2 = tf.get_variable('b2', [10], initializer=tf.constant_initializer(0.0))
 
-W1 = tf.get_variable('W2', [784, 10], initializer=tf.constant_initializer(0.0))
-b1 = tf.get_variable('b2', [10], initializer=tf.constant_initializer(0.0))
+W1 = tf.get_variable('W1', [784, 10], initializer=tf.constant_initializer(0.0))
+b1 = tf.get_variable('b1', [10], initializer=tf.constant_initializer(0.0))
 
 func = function.Declare("Func", [("x", tf.float32), ("W1", tf.float32), ("b1", tf.float32)], [("ret", tf.float32)])
 @function.Defun(tf.float32, tf.float32, tf.float32, func_name="Func", create_grad_func=True, out_names=["ret"])
@@ -41,7 +41,7 @@ accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
 
 
-file = open("mnist_output.txt", "w") 
+file = open("mnist_output_func.txt", "w") 
 
 # start the session
 with tf.Session() as sess:
@@ -56,7 +56,6 @@ with tf.Session() as sess:
 			_, c = sess.run([optimiser, cross_entropy], feed_dict={x: batch_x, y: batch_y})
 			avg_cost += c / total_batch
 	
-			exit(1)
 	file.write("Epoch:" + str(epoch+1) + " cost =" + str(avg_cost) + "\n")
 	file.write(str((sess.run(accuracy, feed_dict={x: mnist.test.images, y: mnist.test.labels}))) + "\n")
 

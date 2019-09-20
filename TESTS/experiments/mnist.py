@@ -24,8 +24,8 @@ b1 = tf.get_variable('b1', [300], initializer=tf.constant_initializer(0.0))
 # W2 = tf.Variable(tf.random_normal([300, 10], stddev=0.03), name='W2')
 # b2 = tf.Variable(tf.random_normal([10]), name='b2')
 
-W2 = tf.get_variable('W2', [300, 10], initializer=tf.constant_initializer(0.0))
-b2 = tf.get_variable('b2', [10], initializer=tf.constant_initializer(0.0))
+# W2 = tf.get_variable('W2', [300, 10], initializer=tf.constant_initializer(0.0))
+# b2 = tf.get_variable('b2', [10], initializer=tf.constant_initializer(0.0))
 
 # calculate the output of the hidden layer
 hidden_out = tf.add(tf.matmul(x, W1), b1)
