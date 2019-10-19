@@ -418,12 +418,12 @@ class _DefinedFunction(object):
     with temp_graph.as_default():
       # List of placeholders for the function_def.
       inputs = []
-      out_types = []
       for (argname, argtype) in self._args:
         argholder = array_ops.placeholder(argtype, name=argname)
         inputs.append(argholder)
       # Call func and gather the output tensors.
       with vs.variable_scope("", custom_getter=temp_graph.getvar):
+        gradient_out_types = []
         if self._is_gradient:
           self._func_name = self._func_name + "Grad"
           outputs = [self._func(*inputs)]
@@ -431,15 +431,15 @@ class _DefinedFunction(object):
           for (out, name) in list(zip(outputs, self._out_names)):
             argholder = array_ops.placeholder(out.op.node_def.attr["T"].type, name="d"+name)
             dinputs.append(argholder)
-            out_types.append(out.op.node_def.attr["T"].type)
+            gradient_out_types.append(out.op.node_def.attr["T"].type)
+          for (_, argtype) in self._args:
+              gradient_out_types.append(argtype)
+
           doutputs = gradients_impl.gradients(outputs, inputs, dinputs, functions=functions)
           if not isinstance(doutputs, list):
             doutputs = [doutputs]
           outputs.extend(doutputs)
           inputs.extend(dinputs)
-
-          for (_, argtype) in self._args:
-            out_types.append(argtype)
 
         else:
           outputs = self._func(*inputs)
@@ -458,12 +458,16 @@ class _DefinedFunction(object):
         # If func only returned one value, make it a tuple.
         if not isinstance(outputs, (list, tuple)):
           outputs = (outputs,)
-        if any([_ is None for _ in outputs]):
-          raise ValueError("Function can not return None.")
+
+        ############## None Return Values Quick Patch ##############
+        # Any None output values are permitted as they will be replaced with constant Tensors
+        # if any([_ is None for _ in outputs]):
+        #   raise ValueError("Function can not return None.")
+
       # Ensures each output is a Tensor.
       if self._is_gradient:
         tmp_out = []
-        for out, out_type in zip(outputs, out_types):
+        for out, out_type in zip(outputs, gradient_out_types):
           if out is not None:
             tmp_out.append(ops.convert_to_tensor(out))
           else:
@@ -474,7 +478,7 @@ class _DefinedFunction(object):
               else:
                 tmp_out.append(ops.convert_to_tensor(0))
         outputs = tmp_out
-
+      ###############################################################
       else:
         outputs = [ops.convert_to_tensor(_) for _ in outputs]
     self._extra_inputs = temp_graph.extra_inputs
