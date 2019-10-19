@@ -478,7 +478,8 @@ Status GraphConstructor::InitFromEdges() {
   // Parse the inputs for each node.
   for (int n = 0; n < num_nodes; ++n) {
     const NodeDef& node_def = *node_defs_[n];
-    if (IsMerge(node_def) && !IsReturningNode(node_def)) {
+    //Todo: Find a better condition for detecting recursion cycles
+    if (IsMerge(node_def)) { //} && !IsReturningNode(node_def)) {
       // Cycles in the graph are only allowed for while loops and recursion.
       // A while loop is identified by an edge from a NextIteration node to a Merge node.
       // A recursion is identified by an edge from a Call Node to a Merge node
@@ -486,35 +487,39 @@ Status GraphConstructor::InitFromEdges() {
       // For such Merge nodes, and for function returning nodes only wait for
       // one non-control input before considering the node ready to process in Convert().
       int32 num_control_edges = 0;
-      bool has_loop_back_edge = false;
+      bool has_loop_back_edge = true;
       for (int i = 0; i < node_def.input_size(); ++i) {
         StringPiece input_name(node_def.input(i));
         if (input_name.starts_with("^")) {
           num_control_edges++;
-        } else {
-          TensorId id(ParseTensorName(input_name));
-          if (next_iteration_nodes_.find(id.first.ToString()) !=
-              next_iteration_nodes_.end() ||
-              call_nodes_.find(id.first.ToString()) !=
-              call_nodes_.end()) {
-            has_loop_back_edge = true;
-          }
         }
+//        else {
+//          TensorId id(ParseTensorName(input_name));
+//          if (next_iteration_nodes_.find(id.first.ToString()) !=
+//              next_iteration_nodes_.end() ||
+//              call_nodes_.find(id.first.ToString()) !=
+//              call_nodes_.end()) {
+//            has_loop_back_edge = true;
+//          }
+//        }
       }
       if (has_loop_back_edge) {
         pending_count_.push_back(num_control_edges + 1);
-      } else {
-        pending_count_.push_back(node_def.input_size());
       }
-    } else if (IsReturningNode(node_def)) {
-      int32 num_control_edges = 0;
-      for (int i = 0; i < node_def.input_size(); ++i) {
-        if (StringPiece(node_def.input(i)).starts_with("^")) {
-          num_control_edges++;
-        }
-      }
-      pending_count_.push_back(num_control_edges + 1);
-    } else {
+//      else {
+//        pending_count_.push_back(node_def.input_size());
+//      }
+    }
+//    else if (IsReturningNode(node_def)) {
+//      int32 num_control_edges = 0;
+//      for (int i = 0; i < node_def.input_size(); ++i) {
+//        if (StringPiece(node_def.input(i)).starts_with("^")) {
+//          num_control_edges++;
+//        }
+//      }
+//      pending_count_.push_back(num_control_edges + 1);
+//    }
+    else {
       pending_count_.push_back(node_def.input_size());
     }
     if (node_def.input_size() == 0) {
