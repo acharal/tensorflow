@@ -676,9 +676,9 @@ Status CallRewriter::TransformNode(const CallInfo& info,
       for (unsigned int i = 0; i < f.rets.size(); i++) {
           ReplaceOutput(strings::StrCat(call->name(), ":", i), ret_nodes[i]->name());
       }
-      if (f.rets.size() == 1) {
-          ReplaceOutput(call->name(), ret_nodes[0]->name());
-      }
+//      if (f.rets.size() == 1) {
+      ReplaceOutput(call->name(), ret_nodes[0]->name());
+//      }
   }
 
   // for each call create a control dependency to each return
