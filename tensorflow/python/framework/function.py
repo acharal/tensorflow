@@ -418,6 +418,7 @@ class _DefinedFunction(object):
     with temp_graph.as_default():
       # List of placeholders for the function_def.
       inputs = []
+      out_types = []
       for (argname, argtype) in self._args:
         argholder = array_ops.placeholder(argtype, name=argname)
         inputs.append(argholder)
@@ -430,11 +431,16 @@ class _DefinedFunction(object):
           for (out, name) in list(zip(outputs, self._out_names)):
             argholder = array_ops.placeholder(out.op.node_def.attr["T"].type, name="d"+name)
             dinputs.append(argholder)
+            out_types.append(out.op.node_def.attr["T"].type)
           doutputs = gradients_impl.gradients(outputs, inputs, dinputs, functions=functions)
           if not isinstance(doutputs, list):
             doutputs = [doutputs]
           outputs.extend(doutputs)
           inputs.extend(dinputs)
+
+          for (_, argtype) in self._args:
+            out_types.append(argtype)
+
         else:
           outputs = self._func(*inputs)
 
@@ -455,7 +461,22 @@ class _DefinedFunction(object):
         if any([_ is None for _ in outputs]):
           raise ValueError("Function can not return None.")
       # Ensures each output is a Tensor.
-      outputs = [ops.convert_to_tensor(_) for _ in outputs]
+      if self._is_gradient:
+        tmp_out = []
+        for out, out_type in zip(outputs, out_types):
+          if out is not None:
+            tmp_out.append(ops.convert_to_tensor(out))
+          else:
+              if out_type.is_bool:
+                tmp_out.append(ops.convert_to_tensor(False))
+              elif out_type.is_floating:
+                tmp_out.append(ops.convert_to_tensor(0.0))
+              else:
+                tmp_out.append(ops.convert_to_tensor(0))
+        outputs = tmp_out
+
+      else:
+        outputs = [ops.convert_to_tensor(_) for _ in outputs]
     self._extra_inputs = temp_graph.extra_inputs
     inputs.extend(temp_graph.extra_args)
     # pylint: disable=protected-access
