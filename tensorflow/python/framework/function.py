@@ -426,7 +426,7 @@ class _DefinedFunction(object):
         gradient_out_types = []
         if self._is_gradient:
           self._func_name = self._func_name + "Grad"
-          outputs = [self._func(*inputs)]
+          outputs = self._func(*inputs)
           dinputs = []
           for (out, name) in list(zip(outputs, self._out_names)):
             argholder = array_ops.placeholder(out.op.node_def.attr["T"].type, name="d"+name)
