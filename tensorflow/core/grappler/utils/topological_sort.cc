@@ -45,50 +45,56 @@ void TopologicalSort(GraphDef* graph) {
     if (IsMerge(*node)) {
       ready_inputs[node] = 0;
       for (const auto& input : node->input()) {
-        if (IsNextIteration(*output_map.GetNode(input))) {
-          ready_inputs[node]++;
-        }
-        else if (IsCall(*output_map.GetNode(input))) {
-          ready_inputs[node] ++;
-          recursion_merge = true;
-        }
+        ready_inputs[node]++;
       }
-      if (recursion_merge) {
-        ready_inputs[node]--;
-        recursion_merge = false;
-      }
+      ready_inputs[node]--;
+//        if (IsNextIteration(*output_map.GetNode(input))) {
+//          ready_inputs[node]++;
+//        }
+//        else if (IsCall(*output_map.GetNode(input))) {
+//          ready_inputs[node] ++;
+//          recursion_merge = true;
+//        }
+//      }
+//      if (recursion_merge) {
+//        ready_inputs[node]--;
+//        recursion_merge = false;
+//      }
 
-    } else if (IsReturn(*node)) {
-      // Nodes that send their output to "Return" nodes are
-      // function Returning Nodes and in case of recursive functions
-      // those nodes are part of graph cycles.
-      for (const auto& input : node->input()) {
-        NodeDef *prevNode = output_map.GetNode(input);
-        // In order to detect the recursion cycles we depend on
-        // the fact that a recursive function's returning node,
-        // will be sending outputs to at least 2 "Return" nodes
-        // with different "call_id" attributes (same "call_id"
-        // attrs would mean that they belong in the same function call
-        // but they correspond to different function outputs)
-        if (!StringPiece(input).starts_with("^")) {
-          int call_id;
-          GetNodeAttr(AttrSlice(*node), "call_id", &call_id);
-          returning_nodes[prevNode].emplace(call_id);
-        }
-      }
-      ready_inputs[node] = 0;
+    }
+//    else if (IsReturn(*node)) {
+//      // Nodes that send their output to "Return" nodes are
+//      // function Returning Nodes and in case of recursive functions
+//      // those nodes are part of graph cycles.
+//      for (const auto& input : node->input()) {
+//        NodeDef *prevNode = output_map.GetNode(input);
+//        // In order to detect the recursion cycles we depend on
+//        // the fact that a recursive function's returning node,
+//        // will be sending outputs to at least 2 "Return" nodes
+//        // with different "call_id" attributes (same "call_id"
+//        // attrs would mean that they belong in the same function call
+//        // but they correspond to different function outputs)
+//        if (!StringPiece(input).starts_with("^")) {
+//          int call_id;
+//          GetNodeAttr(AttrSlice(*node), "call_id", &call_id);
+//          returning_nodes[prevNode].emplace(call_id);
+//        }
+//      }
+//      ready_inputs[node] = 0;
+//
+//    }
 
-    } else {
+    else {
       ready_inputs[node] = 0;
     }
   }
 
-  for (const auto& retnode : returning_nodes) {
-    if (retnode.second.size() > 1) {
-      // Detected Cycle
-      ready_inputs[retnode.first]++;
-    }
-  }
+//  for (const auto& retnode : returning_nodes) {
+//    if (retnode.second.size() > 1) {
+//      // Detected Cycle
+//      ready_inputs[retnode.first]++;
+//    }
+//  }
 
   while (front != back) {
     auto ready_node = ready_nodes[front];
