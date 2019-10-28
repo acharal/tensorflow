@@ -365,7 +365,7 @@ Status GraphExecutionState::OptimizeGraph(
     TF_RETURN_IF_ERROR(
         ConvertGraphDefToGraph(opts, new_graph, optimized_graph->get()));
 
-    /*******************************************************************************************/
+    /*******************************************************************************************
     // Write an event, so that we can visualize this optimized graph in tensorboard
     EventsWriter writer("Fully_Optimized");
     Event event;
@@ -382,7 +382,7 @@ Status GraphExecutionState::OptimizeGraph(
     const void* bf = buf;
     event.set_graph_def(bf, proto_size);
     writer.WriteEvent(event);
-/*******************************************************************************************/
+*******************************************************************************************/
     printf("Transformation passed successfully");
 
 

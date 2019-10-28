@@ -752,7 +752,7 @@ Status CallRewriter::FindCompatibleOrInlineFunction(
               InlineFunction(*func_def, func_instantiation_attr, ctx, device, graph, func_info));
     }
     transformed_functions_[func_name] = func_info;
-    printf("Store inlined function %s\n", func_name.c_str());
+//    printf("Store inlined function %s\n", func_name.c_str());
     return Status::OK();
 }
 
@@ -829,13 +829,13 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
               printf("Error: %s\n", s.error_message().c_str());
               return s;
             }
-            printf("After transforming call %s:\n %s\n", call.fcall->name().c_str(), SummarizeGraphDef(*output).c_str());
+//            printf("After transforming call %s:\n %s\n", call.fcall->name().c_str(), SummarizeGraphDef(*output).c_str());
         }
         calls.clear();
         call_rewriter.Flush();
     }
     call_rewriter.Flush();
-    printf("After finalizing:\n %s\n", SummarizeGraphDef(*output).c_str());
+//    printf("After finalizing:\n %s\n", SummarizeGraphDef(*output).c_str());
     *output->mutable_versions() = item.graph.versions();
 
     // Function Library should be pruned of unreachable function definitions
@@ -852,21 +852,21 @@ Status FunctionTransformation::Optimize(Cluster* cluster, const GrapplerItem& it
     // const GraphDef* tmp = optimized_graph;
     // printf("Summarize Optimized Graph\n %s\n", SummarizeGraphDef(*tmp).c_str());
     // Write an event, so that we can visualize this optimized graph in tensorboard
-    EventsWriter writer("TRANSFORMATION");
-    Event event;
-    event.set_wall_time(1234);
-    event.set_step(34);
-    const size_t proto_size = output->ByteSizeLong();
-    void* buf = port::Malloc(proto_size);
-    if (buf == nullptr) {
-    return errors::ResourceExhausted(
-              "Failed to allocate memory to serialize message of type '" ,
-              output->GetTypeName(), "' and size ", proto_size);
-    }
-    output->SerializeToArray(buf, proto_size);
-    const void* bf = buf;
-    event.set_graph_def(bf, proto_size);
-    writer.WriteEvent(event);
+//    EventsWriter writer("TRANSFORMATION");
+//    Event event;
+//    event.set_wall_time(1234);
+//    event.set_step(34);
+//    const size_t proto_size = output->ByteSizeLong();
+//    void* buf = port::Malloc(proto_size);
+//    if (buf == nullptr) {
+//    return errors::ResourceExhausted(
+//              "Failed to allocate memory to serialize message of type '" ,
+//              output->GetTypeName(), "' and size ", proto_size);
+//    }
+//    output->SerializeToArray(buf, proto_size);
+//    const void* bf = buf;
+//    event.set_graph_def(bf, proto_size);
+//    writer.WriteEvent(event);
     /******************************************************************************************************/
 
     return Status::OK();
