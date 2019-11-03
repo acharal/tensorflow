@@ -2561,15 +2561,16 @@ void ExecutorState::FrameState::ActivateNodes(const NodeItem* item,
                                         &pending, &dead);
 
       if (dst_item->is_return && increment_dead) {
-        // The only dead input a Return op will ever may get
-        // is the control input propagated to it from a corresponding
-        // dead Call op in case of untaken branch. So at this point
-        // we are certain that Return op will never receive another input.
+        // The only dead inputs a Return op will ever may get
+        // are the control inputs propagated to it by the corresponding
+        // dead Call ops in case of untaken branch. So at this point
+        // we are certain that Return op will never receive a non control-input.
         // Therefore, we force it to be added in queue for the sake of
-        // deadness propagation and we adjust it for activation once more,
+        // deadness propagation once it has received all its control inputs,
         // so that it no longer waits for another (never coming) input.
-        iter_state->adjust_for_activation(dst_pending_id, increment_dead,
-                                          &pending, &dead);
+        // iter_state->adjust_for_activation(dst_pending_id, increment_dead,
+                                          // &pending, &dead);
+        if (pending == 1) pending = 0;
       }
       dst_dead = (dead > 0);
       dst_ready = (pending == 0);
