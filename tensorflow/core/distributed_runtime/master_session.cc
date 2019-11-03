@@ -53,6 +53,10 @@ limitations under the License.
 #include "tensorflow/core/platform/tracing.h"
 #include "tensorflow/core/public/session_options.h"
 
+#include "tensorflow/core/framework/graph_def_util.h"
+#include "tensorflow/core/util/event.pb.h"
+#include "tensorflow/core/util/events_writer.h"
+
 namespace tensorflow {
 
 // MasterSession wraps ClientGraph in a reference counted object.
@@ -280,6 +284,35 @@ Status MasterSession::ReffedClientGraph::RegisterPartitions(
       std::unordered_map<string, GraphDef> graph_defs;
       Status s = DoBuildPartitions(popts, &graph_defs);
       if (s.ok()) {
+
+        printf("\n\n MASTER PARTITIONS:\n");
+        int i=0;
+        for (const auto& it: graph_defs) {
+          string dvc = it.first;
+          const GraphDef* graphDef = &it.second;
+          printf("\n\nDeviceName :'%s'\n", dvc.c_str());
+          printf("Partition GraphDef:\n %s\n", SummarizeGraphDef(*graphDef).c_str());
+
+          string p = strings::StrCat("Partition", i); i++;
+          EventsWriter writer(p);
+          Event event;
+          event.set_wall_time(1234);
+          event.set_step(34);
+
+          const size_t proto_size = graphDef->ByteSizeLong();
+          void* buf = port::Malloc(proto_size);
+          if (buf == nullptr) {
+            return errors::ResourceExhausted(
+                    "Failed to allocate memory to serialize message of type '" ,
+                    graphDef->GetTypeName(), "' and size ", proto_size);
+          }
+          graphDef->SerializeToArray(buf, proto_size);
+          const void* bf = buf;
+          event.set_graph_def(bf, proto_size);
+          writer.WriteEvent(event);
+
+        }
+
         // NOTE(mrry): The pointers in `graph_defs_for_publishing` do not remain
         // valid after the call to DoRegisterPartitions begins, so
         // `stats_publisher_` must make a copy if it wants to retain the

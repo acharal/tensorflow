@@ -98,6 +98,8 @@ struct FuncInfo {
   DataTypeVector ret_types;
   std::vector<NodeDef*> args;
   std::vector<string> rets;
+  // All Call/Merge nodes of a function must colocate in the same device (important for distributed)
+  string device;
 };
 
 struct FuncGradInfo {
@@ -337,6 +339,8 @@ Status InlineFunction(const FunctionDef& func_def,
                  "Error: ", item_status.error_message());
     }
 
+    func_info.f.device = device;
+
     string prefix = func_def.signature().name();
     int arg_size = func_def.signature().input_arg_size();
     // create an inverse map of arg to provide name -> argument number
@@ -440,6 +444,8 @@ Status InlineFunctionAndGradient(const FunctionDef& fdef,
                  "Failed to inline function ", fdef.signature().name(),
                  "Error: ", item_status.error_message());
     }
+
+    func_info.f.device = func_info.g.device = device;
 
     string prefix = fdef.signature().name();
     size_t farg_size = fdef.signature().input_arg_size();
@@ -617,7 +623,8 @@ Status CallRewriter::TransformNode(const CallInfo& info,
                 i,
                 call_nodes[i]);
 
-        call_nodes[i]->set_device(call->device());
+        call_nodes[i]->set_device(f.device);
+//        call_nodes[i]->set_device(call->device());
 
         // connect the input of the inlined function to feed from call.
         TF_RETURN_IF_ERROR(ConnectInput(call_nodes[i], f.args[i]));
@@ -650,7 +657,8 @@ Status CallRewriter::TransformNode(const CallInfo& info,
                 call->name(),
                 i,
                 ret_nodes[i]);
-        ret_nodes[i]->set_device(call->device());
+        ret_nodes[i]->set_device(f.device);
+//        ret_nodes[i]->set_device(call->device());
       }
   }
 
